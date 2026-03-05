@@ -94,6 +94,39 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
 
         ImGui.PushStyleColor(ImGuiCol.Text, ColorYellow);
+        ImGui.TextUnformatted("Blacklist Actions");
+        ImGui.PopStyleColor();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        if (ImGui.Button("Blacklist Current Target", new Vector2(-1, 30)))
+        {
+            // We call the plugin's internal method
+            ((Plugin)SmartBlockChecker.Plugin.PluginInterface.GetType().GetProperty("Plugin")?.GetValue(SmartBlockChecker.Plugin.PluginInterface)!).ExecuteBlacklistTarget();
+        }
+        ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
+        ImGui.TextWrapped("Instantly blacklists whoever you are currently targeting.");
+        ImGui.PopStyleColor();
+
+        ImGui.Spacing();
+
+        int hotkey = _config.BlacklistHotkey;
+        ImGui.TextUnformatted("Quick Blacklist Hotkey:");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(150f);
+        if (ImGui.InputInt("##Hotkey", ref hotkey))
+        {
+            _config.BlacklistHotkey = hotkey;
+            _config.Save();
+        }
+        ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
+        ImGui.TextWrapped("Enter a virtual key code (e.g., 45 for Insert, 121 for F10). 0 to disable.");
+        ImGui.PopStyleColor();
+
+        ImGui.Spacing();
+        ImGui.Spacing();
+
+        ImGui.PushStyleColor(ImGuiCol.Text, ColorYellow);
         ImGui.TextUnformatted("Action Prevention");
         ImGui.PopStyleColor();
         ImGui.Separator();
@@ -239,7 +272,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
             return;
         }
 
-        var nearbyBlocked = new List<(string Name, float Distance)>();
+        var nearbyPlayers = new List<(IGameObject Obj, string Name, float Distance, bool Blocked)>();
 
         foreach (var obj in _objectTable)
         {
@@ -252,60 +285,69 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
             ulong contentId = character->ContentId;
             ulong accountId = character->AccountId;
 
-            if ((contentId != 0 || accountId != 0) && _checker.IsBlocked(contentId, accountId))
+            bool isBlocked = _checker.IsBlocked(contentId, accountId);
+            
+            float distance = 0f;
+            try
             {
-                float distance = 0f;
-                try
+                var localPlayer = _objectTable.LocalPlayer;
+                if (localPlayer != null)
                 {
-                    var localPlayer = _objectTable.LocalPlayer;
-                    if (localPlayer != null)
-                    {
-                        distance = Vector3.Distance(localPlayer.Position, obj.Position);
-                    }
+                    distance = Vector3.Distance(localPlayer.Position, obj.Position);
                 }
-                catch { }
-
-                var name = obj.Name?.TextValue ?? "<Unknown>";
-                nearbyBlocked.Add((name, distance));
             }
+            catch { }
+
+            var name = obj.Name?.TextValue ?? "<Unknown>";
+            nearbyPlayers.Add((obj, name, distance, isBlocked));
         }
 
-        if (nearbyBlocked.Count == 0)
+        if (nearbyPlayers.Count == 0)
         {
             ImGui.PushStyleColor(ImGuiCol.Text, ColorGreen);
-            ImGui.TextUnformatted("\u2714 No blocked players nearby.");
-            ImGui.PopStyleColor();
-            ImGui.Spacing();
-            ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
-            ImGui.TextWrapped("This tab scans the players currently loaded around you and flags any that are on your blacklist.");
+            ImGui.TextUnformatted("\u2714 No players nearby.");
             ImGui.PopStyleColor();
             return;
         }
 
         ImGui.PushStyleColor(ImGuiCol.Text, ColorNearby);
-        ImGui.TextUnformatted($"\u26a0 {nearbyBlocked.Count} blocked player(s) nearby!");
+        ImGui.TextUnformatted($"\ud83d\udc41 Players Nearby");
         ImGui.PopStyleColor();
         ImGui.Separator();
         ImGui.Spacing();
 
-        if (ImGui.BeginTable("##NearbyTable", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg,
+        if (ImGui.BeginTable("##NearbyTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg,
             new Vector2(0, 0)))
         {
             ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableSetupColumn("Distance", ImGuiTableColumnFlags.WidthFixed, 80f);
+            ImGui.TableSetupColumn("Dist", ImGuiTableColumnFlags.WidthFixed, 50f);
+            ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 80f);
             ImGui.TableHeadersRow();
 
-            foreach (var (name, dist) in nearbyBlocked)
+            foreach (var (obj, name, dist, isBlocked) in nearbyPlayers)
             {
                 ImGui.TableNextRow();
 
                 ImGui.TableSetColumnIndex(0);
-                ImGui.PushStyleColor(ImGuiCol.Text, ColorRed);
+                if (isBlocked) ImGui.PushStyleColor(ImGuiCol.Text, ColorRed);
                 ImGui.TextUnformatted(name);
-                ImGui.PopStyleColor();
+                if (isBlocked) ImGui.PopStyleColor();
 
                 ImGui.TableSetColumnIndex(1);
                 ImGui.TextUnformatted($"{dist:F1}y");
+
+                ImGui.TableSetColumnIndex(2);
+                if (isBlocked)
+                {
+                    ImGui.TextUnformatted("Blocked");
+                }
+                else
+                {
+                    if (ImGui.Button($"Block##{obj.ObjectId}"))
+                    {
+                        ((Plugin)SmartBlockChecker.Plugin.PluginInterface.GetType().GetProperty("Plugin")?.GetValue(SmartBlockChecker.Plugin.PluginInterface)!).BlacklistByObject(obj);
+                    }
+                }
             }
 
             ImGui.EndTable();

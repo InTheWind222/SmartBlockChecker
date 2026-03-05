@@ -16,6 +16,8 @@ public class Configuration : IPluginConfiguration
     public float EspDotSize { get; set; } = 3.5f;
     public float EspTextScale { get; set; } = 1.0f;
 
+    public int BlacklistHotkey { get; set; } = 0; // 0 = disabled
+
     [NonSerialized]
     private IDalamudPluginInterface? PluginInterface;
 

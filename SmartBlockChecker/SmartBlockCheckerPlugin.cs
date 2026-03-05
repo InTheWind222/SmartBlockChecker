@@ -20,6 +20,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
+    [PluginService] internal static IFramework Framework { get; private set; } = null!;
 
     private const string CommandName = "/blockchecker";
     private const string SmartBlockCommand = "/smartblock";
@@ -62,10 +63,12 @@ public sealed class Plugin : IDalamudPlugin
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
+        Framework.Update += OnUpdate;
     }
 
     public void Dispose()
     {
+        Framework.Update -= OnUpdate;
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         
@@ -78,17 +81,40 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(SmartBlockCommand);
     }
 
+    private void OnUpdate(IFramework framework)
+    {
+        if (Configuration.BlacklistHotkey != 0 && GameGui.IsGameFocused())
+        {
+            // Simple check for key down. We use FFXIVClientStructs or standard Win32 via Dalamud if possible.
+            // For now, we use the internal key state helper if available or standard check.
+            if (PluginInterface.UiBuilder.KeyDown((Dalamud.Game.ClientState.Keys.VirtualKey)Configuration.BlacklistHotkey))
+            {
+                ExecuteBlacklistTarget();
+            }
+        }
+    }
+
     private void OnCommand(string command, string args)
     {
         ToggleConfigUi();
     }
     
-    private unsafe void OnSmartBlockCommand(string command, string args)
+    private void OnSmartBlockCommand(string command, string args)
+    {
+        ExecuteBlacklistTarget();
+    }
+
+    public unsafe void ExecuteBlacklistTarget()
     {
         var target = TargetManager.Target;
+        BlacklistByObject(target);
+    }
+
+    public unsafe void BlacklistByObject(IGameObject? target)
+    {
         if (target == null || target.ObjectKind != Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Player)
         {
-            ChatGui.PrintError("[SmartBlock] You must have a player targeted to use /smartblock.");
+            ChatGui.PrintError("[SmartBlock] You must have a player targeted to blacklist.");
             return;
         }
 
