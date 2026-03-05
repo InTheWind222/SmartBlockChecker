@@ -302,7 +302,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
             return;
         }
 
-        var nearbyPlayers = new List<(IGameObject Obj, string Name, float Distance, bool Blocked)>();
+        var nearbyPlayers = new List<(IGameObject Obj, string Name, float Distance)>();
 
         foreach (var obj in _objectTable)
         {
@@ -315,69 +315,56 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
             ulong contentId = character->ContentId;
             ulong accountId = character->AccountId;
 
-            bool isBlocked = _checker.IsBlocked(contentId, accountId);
-            
-            float distance = 0f;
-            try
+            if ((contentId != 0 || accountId != 0) && _checker.IsBlocked(contentId, accountId))
             {
-                var localPlayer = _objectTable.LocalPlayer;
-                if (localPlayer != null)
+                float distance = 0f;
+                try
                 {
-                    distance = Vector3.Distance(localPlayer.Position, obj.Position);
+                    var localPlayer = _objectTable.LocalPlayer;
+                    if (localPlayer != null)
+                    {
+                        distance = Vector3.Distance(localPlayer.Position, obj.Position);
+                    }
                 }
-            }
-            catch { }
+                catch { }
 
-            var name = obj.Name?.TextValue ?? "<Unknown>";
-            nearbyPlayers.Add((obj, name, distance, isBlocked));
+                var name = obj.Name?.TextValue ?? "<Unknown>";
+                nearbyPlayers.Add((obj, name, distance));
+            }
         }
 
         if (nearbyPlayers.Count == 0)
         {
             ImGui.PushStyleColor(ImGuiCol.Text, ColorGreen);
-            ImGui.TextUnformatted("\u2714 No players nearby.");
+            ImGui.TextUnformatted("\u2714 No blocked players nearby.");
             ImGui.PopStyleColor();
             return;
         }
 
         ImGui.PushStyleColor(ImGuiCol.Text, ColorNearby);
-        ImGui.TextUnformatted($"\ud83d\udc41 Players Nearby");
+        ImGui.TextUnformatted($"\u26a0 {nearbyPlayers.Count} blocked player(s) nearby!");
         ImGui.PopStyleColor();
         ImGui.Separator();
         ImGui.Spacing();
 
-        if (ImGui.BeginTable("##NearbyTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg,
+        if (ImGui.BeginTable("##NearbyTable", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg,
             new Vector2(0, 0)))
         {
             ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableSetupColumn("Dist", ImGuiTableColumnFlags.WidthFixed, 50f);
-            ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 80f);
+            ImGui.TableSetupColumn("Distance", ImGuiTableColumnFlags.WidthFixed, 80f);
             ImGui.TableHeadersRow();
 
-            foreach (var (obj, name, dist, isBlocked) in nearbyPlayers)
+            foreach (var (obj, name, dist) in nearbyPlayers)
             {
                 ImGui.TableNextRow();
 
                 ImGui.TableSetColumnIndex(0);
-                if (isBlocked) ImGui.PushStyleColor(ImGuiCol.Text, ColorRed);
+                ImGui.PushStyleColor(ImGuiCol.Text, ColorRed);
                 ImGui.TextUnformatted(name);
-                if (isBlocked) ImGui.PopStyleColor();
+                ImGui.PopStyleColor();
 
                 ImGui.TableSetColumnIndex(1);
                 ImGui.TextUnformatted($"{dist:F1}y");
-
-                ImGui.TableSetColumnIndex(2);
-                if (isBlocked)
-                {
-                    ImGui.TextUnformatted("Blocked");
-                }
-                else
-                {
-                    if (ImGui.Button($"Block##{name}_{obj.Address.ToInt64()}"))
-                    {
-                        _plugin.BlacklistByObject(obj);
-                    }
-                }
             }
 
             ImGui.EndTable();
