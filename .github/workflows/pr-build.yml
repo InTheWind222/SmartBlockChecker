@@ -1,16 +1,13 @@
-name: Sample PR Builder for SamplePlugin
+name: PR Build (SmartBlockChecker)
 
 on:
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
 
 jobs:
 
   build:
     runs-on: windows-2022
-
-    env:
-      Solution_Name: SamplePlugin
 
     steps:
     - name: Checkout
@@ -32,8 +29,7 @@ jobs:
     - name: Store artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: SamplePlugin
-        path: .\SamplePlugin\bin\x64\Release\SamplePlugin\*
+        name: SmartBlockChecker
+        path: .\SmartBlockChecker\bin\x64\Release\*
         if-no-files-found: error
         retention-days: 1
-

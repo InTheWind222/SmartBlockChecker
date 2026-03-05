@@ -1,0 +1,112 @@
+name: Auto Release (Main)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: smartblock-main-release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Download Dalamud SDK files
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest_dalamud.zip
+          Expand-Archive -Force latest_dalamud.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+      - name: Bump version in manifests
+        id: bump
+        shell: pwsh
+        run: |
+          $csproj = "SmartBlockChecker/SmartBlockChecker.csproj"
+          [xml]$xml = Get-Content -Raw $csproj
+          $current = [string]$xml.Project.PropertyGroup.Version
+          if ([string]::IsNullOrWhiteSpace($current)) {
+            throw "Missing <Version> in $csproj"
+          }
+
+          $parts = $current.Split(".")
+          while ($parts.Count -lt 4) {
+            $parts += "0"
+          }
+
+          $last = [int]$parts[$parts.Count - 1]
+          $parts[$parts.Count - 1] = ($last + 1).ToString()
+          $newVersion = ($parts -join ".")
+
+          $xml.Project.PropertyGroup.Version = $newVersion
+          $xml.Save((Resolve-Path $csproj))
+
+          $pluginJsonPath = "SmartBlockChecker/SmartBlockChecker.json"
+          $pluginJson = Get-Content -Raw $pluginJsonPath | ConvertFrom-Json
+          $pluginJson.AssemblyVersion = $newVersion
+          ($pluginJson | ConvertTo-Json -Depth 20) + "`n" | Set-Content -NoNewline:$false -Encoding UTF8 $pluginJsonPath
+
+          $masterPath = "pluginmaster.json"
+          $master = Get-Content -Raw $masterPath | ConvertFrom-Json
+          $master[0].AssemblyVersion = $newVersion
+          $master[0].DownloadLinkInstall = "https://cdn.jsdelivr.net/gh/frenchpresssscoffee-blip/SmartBlock-@main/latest.zip"
+          ($master | ConvertTo-Json -Depth 20) + "`n" | Set-Content -NoNewline:$false -Encoding UTF8 $masterPath
+
+          "new_version=$newVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build Release
+        run: dotnet build --configuration Release
+
+      - name: Create latest.zip
+        shell: pwsh
+        run: |
+          $releaseDir = "SmartBlockChecker/bin/x64/Release"
+          Compress-Archive -Force `
+            -Path "$releaseDir/goat.png","$releaseDir/SmartBlockChecker.deps.json","$releaseDir/SmartBlockChecker.dll","$releaseDir/SmartBlockChecker.json" `
+            -DestinationPath "latest.zip"
+
+      - name: Verify packaged version
+        shell: pwsh
+        run: |
+          $tmp = "verify_zip"
+          if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+          New-Item -ItemType Directory -Path $tmp | Out-Null
+          tar -xf latest.zip -C $tmp
+          $manifest = Get-Content -Raw "$tmp/SmartBlockChecker.json" | ConvertFrom-Json
+          if ($manifest.AssemblyVersion -ne "${{ steps.bump.outputs.new_version }}") {
+            throw "Packaged version $($manifest.AssemblyVersion) does not match bumped version ${{ steps.bump.outputs.new_version }}"
+          }
+
+      - name: Commit and push release artifacts
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add SmartBlockChecker/SmartBlockChecker.csproj SmartBlockChecker/SmartBlockChecker.json pluginmaster.json latest.zip
+
+          if ((git diff --cached --name-only).Count -eq 0) {
+            Write-Host "No changes to commit."
+            exit 0
+          }
+
+          git commit -m "ci: release v${{ steps.bump.outputs.new_version }} [skip ci]"
+          git push origin HEAD:main
+
