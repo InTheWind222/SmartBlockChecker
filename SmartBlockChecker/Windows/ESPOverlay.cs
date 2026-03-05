@@ -145,7 +145,7 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
             if (_gameGui.WorldToScreen(worldPos, out var screenPos))
             {
                 // Draw a small static red dot at the player's feet
-                float dotRadius = 3.5f;
+                float dotRadius = _config.EspDotSize;
                 drawList.AddCircleFilled(screenPos, dotRadius,
                     ImGui.ColorConvertFloat4ToU32(new Vector4(1, 0.1f, 0.1f, 1.0f)));
                 
@@ -159,6 +159,7 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
                     string playerName = obj.Name?.TextValue ?? "Unknown";
                     string text = $"\u26d4 BLOCKED: {playerName}";
                     
+                    ImGui.SetWindowFontScale(_config.EspTextScale);
                     var textSize = ImGui.CalcTextSize(text);
                     var textPos = new Vector2(headScreenPos.X - (textSize.X / 2), headScreenPos.Y);
 
@@ -171,6 +172,9 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
 
                     drawList.AddText(textPos,
                         ImGui.ColorConvertFloat4ToU32(new Vector4(1, 0.4f, 0.4f, 1)), text);
+                    
+                    // Reset font scale back to default for other elements
+                    ImGui.SetWindowFontScale(1.0f);
                 }
             }
         } 

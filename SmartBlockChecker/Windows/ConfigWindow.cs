@@ -119,14 +119,35 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
 
         bool showOverlay = _config.ShowEspCircles;
-        if (ImGui.Checkbox("ESP circles on blocked players", ref showOverlay))
+        if (ImGui.Checkbox("ESP indicators on blocked players", ref showOverlay))
         {
             _config.ShowEspCircles = showOverlay;
             _config.Save();
         }
         ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
-        ImGui.TextWrapped("Draws red pulsing rings around any blocked player visible in the world.");
+        ImGui.TextWrapped("Draws a static red dot and name tag on any blocked player visible in the world.");
         ImGui.PopStyleColor();
+
+        if (_config.ShowEspCircles)
+        {
+            ImGui.Indent(20f);
+            
+            float dotSize = _config.EspDotSize;
+            if (ImGui.SliderFloat("Dot Size", ref dotSize, 1.0f, 20.0f, "%.1f"))
+            {
+                _config.EspDotSize = dotSize;
+                _config.Save();
+            }
+
+            float textScale = _config.EspTextScale;
+            if (ImGui.SliderFloat("Text Scale", ref textScale, 0.5f, 3.0f, "%.1f"))
+            {
+                _config.EspTextScale = textScale;
+                _config.Save();
+            }
+
+            ImGui.Unindent(20f);
+        }
 
         ImGui.Spacing();
 
