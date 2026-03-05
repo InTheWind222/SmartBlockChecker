@@ -6,11 +6,10 @@
   "Description": "Hooks UseAction to prevent casting and wasting GCDs on blocked players. Draws ESP circles on blocked players. /blockchecker to configure.",
   "ApplicableVersion": "any",
   "AssemblyVersion": "0.0.0.5",
-  "RepoUrl": "https://github.com/frenchpresssscoffee-blip/SmartBlock-",
+  "RepoUrl": "https://github.com/InTheWind222/SmartBlockCheccker",
   "Tags": [
     "sample",
     "plugin",
     "goats"
   ]
 }
-

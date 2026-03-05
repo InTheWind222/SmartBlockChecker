@@ -66,7 +66,7 @@ jobs:
           $masterPath = "pluginmaster.json"
           $master = Get-Content -Raw $masterPath | ConvertFrom-Json
           $master[0].AssemblyVersion = $newVersion
-          $master[0].DownloadLinkInstall = "https://cdn.jsdelivr.net/gh/frenchpresssscoffee-blip/SmartBlock-@main/latest.zip"
+          $master[0].DownloadLinkInstall = "https://cdn.jsdelivr.net/gh/InTheWind222/SmartBlockCheccker@main/latest.zip"
           ($master | ConvertTo-Json -Depth 20) + "`n" | Set-Content -NoNewline:$false -Encoding UTF8 $masterPath
 
           "new_version=$newVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -109,4 +109,3 @@ jobs:
 
           git commit -m "ci: release v${{ steps.bump.outputs.new_version }} [skip ci]"
           git push origin HEAD:main
-
