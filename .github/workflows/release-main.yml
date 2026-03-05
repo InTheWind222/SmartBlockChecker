@@ -71,7 +71,7 @@ jobs:
             $master = @($masterRaw)
           }
           $master[0].AssemblyVersion = $newVersion
-          $master[0].DownloadLinkInstall = "https://raw.githubusercontent.com/InTheWind222/SmartBlockChecker/refs/heads/main/latest.zip"
+          $master[0].DownloadLinkInstall = "https://cdn.jsdelivr.net/gh/InTheWind222/SmartBlockChecker@main/latest.zip"
           ($master | ConvertTo-Json -Depth 20 -AsArray) + "`n" | Set-Content -NoNewline:$false -Encoding UTF8 $masterPath
 
           "new_version=$newVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -114,3 +114,21 @@ jobs:
 
           git commit -m "ci: release v${{ steps.bump.outputs.new_version }} [skip ci]"
           git push origin HEAD:main
+
+      - name: Purge jsDelivr cache
+        shell: pwsh
+        run: |
+          $purgeUrls = @(
+            "https://purge.jsdelivr.net/gh/InTheWind222/SmartBlockChecker@main/pluginmaster.json",
+            "https://purge.jsdelivr.net/gh/InTheWind222/SmartBlockChecker@main/latest.zip",
+            "https://purge.jsdelivr.net/gh/InTheWind222/SmartBlockCheccker@main/pluginmaster.json",
+            "https://purge.jsdelivr.net/gh/InTheWind222/SmartBlockCheccker@main/latest.zip"
+          )
+          foreach ($url in $purgeUrls) {
+            try {
+              Invoke-WebRequest -UseBasicParsing -Uri $url | Out-Null
+              Write-Host "Purged: $url"
+            } catch {
+              Write-Warning "Purge failed: $url -- $($_.Exception.Message)"
+            }
+          }
