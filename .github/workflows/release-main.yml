@@ -113,6 +113,22 @@ jobs:
           }
 
           git commit -m "ci: release v${{ steps.bump.outputs.new_version }} [skip ci]"
+
+          # Pin DownloadLinkInstall to this exact release commit hash to avoid stale branch/cdn caches.
+          $releaseCommit = (git rev-parse HEAD).Trim()
+          $masterPath = "pluginmaster.json"
+          $master = Get-Content -Raw $masterPath | ConvertFrom-Json
+          if ($master -isnot [System.Array]) {
+            $master = @($master)
+          }
+          $master[0].DownloadLinkInstall = "https://raw.githubusercontent.com/InTheWind222/SmartBlockChecker/$releaseCommit/latest.zip"
+          ($master | ConvertTo-Json -Depth 20 -AsArray) + "`n" | Set-Content -NoNewline:$false -Encoding UTF8 $masterPath
+
+          git add pluginmaster.json
+          if ((git diff --cached --name-only).Count -gt 0) {
+            git commit -m "ci: pin download URL for v${{ steps.bump.outputs.new_version }} [skip ci]"
+          }
+
           git push origin HEAD:main
 
       - name: Purge jsDelivr cache
