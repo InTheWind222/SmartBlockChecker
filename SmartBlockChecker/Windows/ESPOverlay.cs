@@ -110,16 +110,16 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
         var drawList = ImGui.GetBackgroundDrawList();
         var display = ImGui.GetIO().DisplaySize;
 
-        float pulse = 0.7f + 0.3f * (float)Math.Sin(_pulseTimer * 3.0f);
+        float alpha = 0.9f;
 
         float bannerY = display.Y * 0.12f;
         float bannerH = 36f;
         var bannerMin = new Vector2(display.X * 0.3f, bannerY);
         var bannerMax = new Vector2(display.X * 0.7f, bannerY + bannerH);
         drawList.AddRectFilled(bannerMin, bannerMax,
-            ImGui.ColorConvertFloat4ToU32(new Vector4(0.6f, 0.0f, 0.0f, 0.75f * pulse)), 6f);
+            ImGui.ColorConvertFloat4ToU32(new Vector4(0.6f, 0.0f, 0.0f, 0.75f * alpha)), 6f);
         drawList.AddRect(bannerMin, bannerMax,
-            ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.3f, 0.3f, pulse)), 6f, ImDrawFlags.None, 2f);
+            ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.3f, 0.3f, alpha)), 6f, ImDrawFlags.None, 2f);
 
         var text = "\u26a0  BLOCKED TARGET  \u26a0";
         var textSize = ImGui.CalcTextSize(text);
@@ -129,9 +129,9 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
         );
 
         drawList.AddText(textPos + new Vector2(1, 1),
-            ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, pulse)), text);
+            ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, alpha)), text);
         drawList.AddText(textPos,
-            ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, pulse)), text);
+            ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, alpha)), text);
     }
 
     private void DrawESPCircle(IGameObject obj)
@@ -144,19 +144,14 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
         {
             if (_gameGui.WorldToScreen(worldPos, out var screenPos))
             {
-                float pulse = (float)Math.Sin(_pulseTimer * 2.5f);
-                float innerRadius = 4f;
-                float outerRadius = 14f + pulse * 4f;
-                float outerAlpha = 0.6f + 0.4f * ((pulse + 1f) / 2f);
-
-                drawList.AddCircleFilled(screenPos, innerRadius,
-                    ImGui.ColorConvertFloat4ToU32(new Vector4(1, 0.1f, 0.1f, 0.9f)));
-
-                drawList.AddCircle(screenPos, outerRadius,
-                    ImGui.ColorConvertFloat4ToU32(new Vector4(1, 0.2f, 0.2f, outerAlpha)), 32, 2.5f);
-
-                drawList.AddCircle(screenPos, outerRadius + 4f,
-                    ImGui.ColorConvertFloat4ToU32(new Vector4(1, 0.1f, 0.1f, outerAlpha * 0.3f)), 32, 1.5f);
+                // Draw a small static red dot at the player's feet
+                float dotRadius = 3.5f;
+                drawList.AddCircleFilled(screenPos, dotRadius,
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(1, 0.1f, 0.1f, 1.0f)));
+                
+                // Add a small black outline to make it visible on different surfaces
+                drawList.AddCircle(screenPos, dotRadius,
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, 1.0f)), 16, 1.0f);
 
                 var headPos = new Vector3(worldPos.X, worldPos.Y + 2.2f, worldPos.Z);
                 if (_gameGui.WorldToScreen(headPos, out var headScreenPos))
