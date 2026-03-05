@@ -71,7 +71,7 @@ jobs:
             $master = @($masterRaw)
           }
           $master[0].AssemblyVersion = $newVersion
-          $master[0].DownloadLinkInstall = "https://raw.githubusercontent.com/InTheWind222/SmartBlockCheccker/main/latest.zip"
+          $master[0].DownloadLinkInstall = "https://raw.githubusercontent.com/InTheWind222/SmartBlockCheccker/refs/heads/main/latest.zip"
           ($master | ConvertTo-Json -Depth 20 -AsArray) + "`n" | Set-Content -NoNewline:$false -Encoding UTF8 $masterPath
 
           "new_version=$newVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
