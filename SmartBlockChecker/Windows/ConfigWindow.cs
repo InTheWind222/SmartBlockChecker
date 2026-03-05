@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Plugin.Services;
@@ -11,6 +12,7 @@ namespace SmartBlockChecker.Windows;
 
 internal sealed unsafe class ConfigWindow : Window, IDisposable
 {
+    private readonly Plugin _plugin;
     private readonly Configuration _config;
     private readonly BlacklistChecker _checker;
     private readonly IObjectTable _objectTable;
@@ -36,6 +38,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
             MaximumSize = new Vector2(600, 800)
         };
 
+        _plugin = plugin;
         _config = plugin.Configuration;
         _checker = checker;
         _objectTable = objectTable;
@@ -89,6 +92,8 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         }
     }
 
+    private bool _isRecordingHotkey = false;
+
     private void DrawSettingsTab()
     {
         ImGui.Spacing();
@@ -101,8 +106,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
 
         if (ImGui.Button("Blacklist Current Target", new Vector2(-1, 30)))
         {
-            // We call the plugin's internal method
-            ((Plugin)SmartBlockChecker.Plugin.PluginInterface.GetType().GetProperty("Plugin")?.GetValue(SmartBlockChecker.Plugin.PluginInterface)!).ExecuteBlacklistTarget();
+            _plugin.ExecuteBlacklistTarget();
         }
         ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
         ImGui.TextWrapped("Instantly blacklists whoever you are currently targeting.");
@@ -110,17 +114,43 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
 
         ImGui.Spacing();
 
-        int hotkey = _config.BlacklistHotkey;
         ImGui.TextUnformatted("Quick Blacklist Hotkey:");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(150f);
-        if (ImGui.InputInt("##Hotkey", ref hotkey))
+        
+        string hotkeyName = _config.BlacklistHotkey == 0 ? "None" : ((Dalamud.Game.ClientState.Keys.VirtualKey)_config.BlacklistHotkey).ToString();
+        if (_isRecordingHotkey) hotkeyName = "Press a key...";
+
+        if (ImGui.Button($"{hotkeyName}##HotkeyRecord", new Vector2(150, 0)))
         {
-            _config.BlacklistHotkey = hotkey;
+            _isRecordingHotkey = true;
+        }
+
+        if (_isRecordingHotkey)
+        {
+            for (int vk = 1; vk < 255; vk++)
+            {
+                if ((GetAsyncKeyState(vk) & 0x8000) != 0)
+                {
+                    _config.BlacklistHotkey = vk;
+                    _config.Save();
+                    _isRecordingHotkey = false;
+                    break;
+                }
+            }
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) || ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+            {
+                _isRecordingHotkey = false;
+            }
+        }
+
+        if (ImGui.Button("Clear Hotkey"))
+        {
+            _config.BlacklistHotkey = 0;
             _config.Save();
         }
+
         ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
-        ImGui.TextWrapped("Enter a virtual key code (e.g., 45 for Insert, 121 for F10). 0 to disable.");
+        ImGui.TextWrapped("Click the button and press a key to set it as your quick-blacklist shortcut.");
         ImGui.PopStyleColor();
 
         ImGui.Spacing();
@@ -345,7 +375,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
                 {
                     if (ImGui.Button($"Block##{name}_{obj.Address.ToInt64()}"))
                     {
-                        ((Plugin)SmartBlockChecker.Plugin.PluginInterface.GetType().GetProperty("Plugin")?.GetValue(SmartBlockChecker.Plugin.PluginInterface)!).BlacklistByObject(obj);
+                        _plugin.BlacklistByObject(obj);
                     }
                 }
             }
@@ -353,4 +383,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
             ImGui.EndTable();
         }
     }
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 }
