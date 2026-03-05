@@ -282,12 +282,6 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
         ImGui.TextUnformatted("Data refreshes every ~2 seconds.");
         ImGui.PopStyleColor();
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
-        ImGui.TextWrapped($"Diag: {_checker.DiagnosticInfo}");
-        ImGui.PopStyleColor();
     }
 
     private void DrawNearbyTab()
