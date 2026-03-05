@@ -3,8 +3,10 @@ using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
+using Dalamud.Game.ClientState.Objects.Types;
 using SmartBlockChecker.Windows;
 using SmartBlockChecker.Hooking;
+using System.Runtime.InteropServices;
 
 namespace SmartBlockChecker;
 
@@ -29,6 +31,7 @@ public sealed class Plugin : IDalamudPlugin
     
     private readonly BlacklistChecker _blacklistChecker;
     private readonly HookHandler _hookHandler;
+    private bool _hotkeyWasDown;
 
     public readonly WindowSystem WindowSystem = new("SmartBlockChecker");
     private ConfigWindow ConfigWindow { get; init; }
@@ -83,15 +86,19 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnUpdate(IFramework framework)
     {
-        if (Configuration.BlacklistHotkey != 0 && GameGui.IsGameFocused())
+        if (Configuration.BlacklistHotkey <= 0 || !ClientState.IsLoggedIn)
         {
-            // Simple check for key down. We use FFXIVClientStructs or standard Win32 via Dalamud if possible.
-            // For now, we use the internal key state helper if available or standard check.
-            if (PluginInterface.UiBuilder.KeyDown((Dalamud.Game.ClientState.Keys.VirtualKey)Configuration.BlacklistHotkey))
-            {
-                ExecuteBlacklistTarget();
-            }
+            _hotkeyWasDown = false;
+            return;
         }
+
+        var isDown = (GetAsyncKeyState(Configuration.BlacklistHotkey) & 0x8000) != 0;
+        if (isDown && !_hotkeyWasDown)
+        {
+            ExecuteBlacklistTarget();
+        }
+
+        _hotkeyWasDown = isDown;
     }
 
     private void OnCommand(string command, string args)
@@ -150,4 +157,7 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 }

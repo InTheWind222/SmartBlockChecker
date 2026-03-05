@@ -343,7 +343,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
                 }
                 else
                 {
-                    if (ImGui.Button($"Block##{obj.ObjectId}"))
+                    if (ImGui.Button($"Block##{name}_{obj.Address.ToInt64()}"))
                     {
                         ((Plugin)SmartBlockChecker.Plugin.PluginInterface.GetType().GetProperty("Plugin")?.GetValue(SmartBlockChecker.Plugin.PluginInterface)!).BlacklistByObject(obj);
                     }
