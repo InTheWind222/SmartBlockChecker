@@ -1,27 +1,27 @@
+using System;
 using System.Collections.Generic;
 using Dalamud.Plugin.Services;
-using System;
 
 namespace SmartBlockChecker.Hooking;
 
-internal class HookHandler : IDisposable
+internal sealed class HookController : IDisposable
 {
     private readonly IPluginLog _log;
     private readonly List<HookableElement> _hooks = new();
 
-    public readonly Hooks.ActionHook ActionHook;
-
-    public HookHandler(IGameInteropProvider hooker, IPluginLog log, BlacklistChecker blacklistChecker, Configuration config)
+    public HookController(
+        IGameInteropProvider interopProvider,
+        IPluginLog log,
+        BlacklistService blacklistService,
+        Configuration configuration)
     {
         _log = log;
-
-        ActionHook = new Hooks.ActionHook(hooker, log, blacklistChecker, config);
-        _hooks.Add(ActionHook);
+        _hooks.Add(new Hooks.ActionHook(interopProvider, log, blacklistService, configuration));
     }
 
     public void Initialize()
     {
-        _log.Verbose("Initializing HookHandler...");
+        _log.Verbose("Initializing hooks.");
         foreach (var hook in _hooks)
         {
             hook.Init();
@@ -32,7 +32,7 @@ internal class HookHandler : IDisposable
     {
         foreach (var hook in _hooks)
         {
-            hook?.Dispose();
+            hook.Dispose();
         }
     }
 }

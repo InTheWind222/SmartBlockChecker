@@ -3,16 +3,17 @@
     "Author": "jungle",
     "Name": "Smart Block Checker",
     "InternalName": "SmartBlockChecker",
-    "Punchline": "Smart block checker and ESP overlay for FFXIV.",
-    "Description": "Hooks UseAction to prevent casting and wasting GCDs on blocked players. Draws ESP circles on blocked players. /blockchecker to configure.",
+    "Punchline": "Blacklist-aware targeting protection and player highlighting for FFXIV.",
+    "Description": "Prevents targeted actions from firing on blacklisted players, highlights blocked players in the world, and adds a quick blacklist command. Use /blockchecker to configure.",
     "ApplicableVersion": "any",
     "AssemblyVersion": "0.0.0.23",
     "RepoUrl": "https://github.com/InTheWind222/SmartBlockChecker",
     "DalamudApiLevel": 14,
     "Tags": [
-      "sample",
-      "plugin",
-      "goats"
+      "blacklist",
+      "utility",
+      "overlay",
+      "pvp"
     ],
     "IsHide": false,
     "IsTestingExclusive": false,

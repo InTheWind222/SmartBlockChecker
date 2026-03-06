@@ -1,39 +1,46 @@
 using Dalamud.Game.ClientState.Objects;
 using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
-using Dalamud.Interface.Windowing;
-using Dalamud.Bindings.ImGui;
-using System.Numerics;
 using System;
+using System.Numerics;
 
 namespace SmartBlockChecker.Windows;
 
 internal sealed unsafe class ESPOverlay : Window, IDisposable
 {
-    private readonly BlacklistChecker _checker;
+    private readonly BlacklistService _blacklistService;
     private readonly IObjectTable _objectTable;
     private readonly IGameGui _gameGui;
     private readonly IClientState _clientState;
     private readonly ITargetManager _targetManager;
     private readonly Configuration _config;
+    private readonly IPluginLog _log;
 
-    private float _pulseTimer = 0f;
-
-    public ESPOverlay(BlacklistChecker checker, IObjectTable objectTable, IGameGui gameGui, ITargetManager targetManager, Configuration config, IClientState clientState) 
-        : base("SmartBlockCheckerESP", 
-              ImGuiWindowFlags.NoInputs | 
-              ImGuiWindowFlags.NoNav | 
-              ImGuiWindowFlags.NoTitleBar | 
-              ImGuiWindowFlags.NoScrollbar | 
+    public ESPOverlay(
+        BlacklistService blacklistService,
+        IObjectTable objectTable,
+        IGameGui gameGui,
+        ITargetManager targetManager,
+        Configuration config,
+        IClientState clientState,
+        IPluginLog log)
+        : base("SmartBlockCheckerESP",
+              ImGuiWindowFlags.NoInputs |
+              ImGuiWindowFlags.NoNav |
+              ImGuiWindowFlags.NoTitleBar |
+              ImGuiWindowFlags.NoScrollbar |
               ImGuiWindowFlags.NoBackground)
     {
-        _checker = checker;
+        _blacklistService = blacklistService;
         _objectTable = objectTable;
         _gameGui = gameGui;
         _targetManager = targetManager;
         _config = config;
         _clientState = clientState;
+        _log = log;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -56,10 +63,7 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
         if (!_config.ShowEspCircles && !_config.ShowTargetWarning) return;
         if (!_clientState.IsLoggedIn) return;
 
-        _pulseTimer += ImGui.GetIO().DeltaTime;
-        if (_pulseTimer > 6.283f) _pulseTimer -= 6.283f;
-
-        try 
+        try
         {
             if (_config.ShowTargetWarning)
             {
@@ -69,7 +73,7 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
                     var structTarget = (Character*)charTarget.Address;
                     if (structTarget != null)
                     {
-                        if (_checker.IsBlocked(structTarget->ContentId, structTarget->AccountId))
+                        if (_blacklistService.IsBlocked(structTarget->ContentId, structTarget->AccountId))
                         {
                             DrawTargetWarning();
                         }
@@ -92,7 +96,7 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
 
                     if (contentId != 0 || accountId != 0)
                     {
-                        if (_checker.IsBlocked(contentId, accountId))
+                        if (_blacklistService.IsBlocked(contentId, accountId))
                         {
                             DrawESPCircle(obj);
                         }
@@ -100,8 +104,9 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
                 }
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _log.Warning(ex, "Failed while drawing the ESP overlay.");
         }
     }
 
@@ -140,16 +145,14 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
         var worldPos = obj.Position;
         if (worldPos == Vector3.Zero) return;
 
-        try 
+        try
         {
             if (_gameGui.WorldToScreen(worldPos, out var screenPos))
             {
-                // Draw a small static red dot at the player's feet
                 float dotRadius = _config.EspDotSize;
                 drawList.AddCircleFilled(screenPos, dotRadius,
                     ImGui.ColorConvertFloat4ToU32(new Vector4(1, 0.1f, 0.1f, 1.0f)));
-                
-                // Add a small black outline to make it visible on different surfaces
+
                 drawList.AddCircle(screenPos, dotRadius,
                     ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, 1.0f)), 16, 1.0f);
 
@@ -172,12 +175,14 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
 
                     drawList.AddText(textPos,
                         ImGui.ColorConvertFloat4ToU32(new Vector4(1, 0.4f, 0.4f, 1)), text);
-                    
-                    // Reset font scale back to default for other elements
+
                     ImGui.SetWindowFontScale(1.0f);
                 }
             }
-        } 
-        catch { }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Failed while drawing a blocked-player ESP marker.");
+        }
     }
 }

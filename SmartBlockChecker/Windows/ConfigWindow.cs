@@ -12,14 +12,15 @@ namespace SmartBlockChecker.Windows;
 
 internal sealed unsafe class ConfigWindow : Window, IDisposable
 {
-    private readonly Plugin _plugin;
+    private readonly string _pluginVersion;
+    private readonly SmartBlockCheckerPlugin _plugin;
     private readonly Configuration _config;
-    private readonly BlacklistChecker _checker;
+    private readonly BlacklistService _blacklistService;
     private readonly IObjectTable _objectTable;
     private readonly IClientState _clientState;
 
-    private List<BlockedPlayerInfo> _cachedBlocked = new();
-    private int _refreshCounter = 0;
+    private List<BlacklistEntry> _cachedBlockedEntries = new();
+    private int _refreshCounter;
     private const int RefreshInterval = 120;
 
     private static readonly Vector4 ColorRed         = new(1.0f, 0.30f, 0.30f, 1.0f);
@@ -29,7 +30,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
     private static readonly Vector4 ColorHeader      = new(0.85f, 0.40f, 0.40f, 1.0f);
     private static readonly Vector4 ColorNearby      = new(1.0f, 0.55f, 0.20f, 1.0f);
 
-    public ConfigWindow(Plugin plugin, BlacklistChecker checker, IObjectTable objectTable, IClientState clientState)
+    public ConfigWindow(SmartBlockCheckerPlugin plugin, BlacklistService blacklistService, IObjectTable objectTable, IClientState clientState)
         : base("Smart Block Checker##ConfigWindow")
     {
         SizeConstraints = new WindowSizeConstraints
@@ -39,8 +40,9 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         };
 
         _plugin = plugin;
+        _pluginVersion = typeof(SmartBlockCheckerPlugin).Assembly.GetName().Version?.ToString() ?? "unknown";
         _config = plugin.Configuration;
-        _checker = checker;
+        _blacklistService = blacklistService;
         _objectTable = objectTable;
         _clientState = clientState;
     }
@@ -53,7 +55,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         if (_refreshCounter >= RefreshInterval)
         {
             _refreshCounter = 0;
-            _cachedBlocked = _checker.GetBlockedEntries();
+            _cachedBlockedEntries = _blacklistService.GetEntries();
         }
 
         ImGui.PushStyleColor(ImGuiCol.Text, ColorHeader);
@@ -62,7 +64,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
 
         ImGui.SameLine();
         ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
-        ImGui.TextUnformatted("v1.0");
+        ImGui.TextUnformatted($"v{_pluginVersion}");
         ImGui.PopStyleColor();
 
         ImGui.Separator();
@@ -230,7 +232,11 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
 
         ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
-        ImGui.TextUnformatted($"Tracking {_cachedBlocked.Count} blocked player(s).");
+        ImGui.TextUnformatted($"Tracking {_cachedBlockedEntries.Count} blocked player(s).");
+        ImGui.PopStyleColor();
+
+        ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
+        ImGui.TextWrapped(_blacklistService.DiagnosticInfo);
         ImGui.PopStyleColor();
     }
 
@@ -238,7 +244,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
     {
         ImGui.Spacing();
 
-        if (_cachedBlocked.Count == 0)
+        if (_cachedBlockedEntries.Count == 0)
         {
             ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
             ImGui.TextWrapped("No blocked players found. Your blacklist is either empty or hasn't loaded yet. Try switching zones or waiting a moment.");
@@ -247,7 +253,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         }
 
         ImGui.PushStyleColor(ImGuiCol.Text, ColorRed);
-        ImGui.TextUnformatted($"{_cachedBlocked.Count} Blocked Player(s)");
+        ImGui.TextUnformatted($"{_cachedBlockedEntries.Count} Blocked Player(s)");
         ImGui.PopStyleColor();
         ImGui.Separator();
         ImGui.Spacing();
@@ -259,9 +265,9 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
             ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch);
             ImGui.TableHeadersRow();
 
-            for (int i = 0; i < _cachedBlocked.Count; i++)
+            for (int i = 0; i < _cachedBlockedEntries.Count; i++)
             {
-                var entry = _cachedBlocked[i];
+                var entry = _cachedBlockedEntries[i];
 
                 ImGui.TableNextRow();
 
@@ -309,18 +315,14 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
             ulong contentId = character->ContentId;
             ulong accountId = character->AccountId;
 
-            if ((contentId != 0 || accountId != 0) && _checker.IsBlocked(contentId, accountId))
+            if ((contentId != 0 || accountId != 0) && _blacklistService.IsBlocked(contentId, accountId))
             {
                 float distance = 0f;
-                try
+                var localPlayer = _objectTable.LocalPlayer;
+                if (localPlayer != null)
                 {
-                    var localPlayer = _objectTable.LocalPlayer;
-                    if (localPlayer != null)
-                    {
-                        distance = Vector3.Distance(localPlayer.Position, obj.Position);
-                    }
+                    distance = Vector3.Distance(localPlayer.Position, obj.Position);
                 }
-                catch { }
 
                 var name = obj.Name?.TextValue ?? "<Unknown>";
                 nearbyPlayers.Add((obj, name, distance));

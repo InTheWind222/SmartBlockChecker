@@ -1,25 +1,41 @@
-# SmartBlockChecker
+# Smart Block Checker
 
-SmartBlockChecker is a Dalamud plugin for FFXIV that helps you manage your blacklist more effectively and avoid wasting GCDs on people you've blocked.
+Smart Block Checker is a Dalamud plugin for FFXIV focused on one thing: reducing friction around your in-game blacklist.
 
-### What it does:
-*   **Prevent Wasted GCDs:** Hooks the game's action usage to prevent you from casting spells or using abilities on players who are on your blacklist.
-*   **ESP Overlay:** Draws visual indicators (ESP circles) on blocked players in the world so you can easily identify them.
-*   **Smart Blacklisting:** Allows you to instantly blacklist your current target with a simple command, bypassing multiple menus.
-*   **In-game Integration:** Reads the native FFXIV blacklist directly using memory offsets for 100% accuracy.
+It prevents targeted actions from firing on blocked players, highlights blocked players in the world, and gives you a quick command for blacklisting your current target without digging through UI menus.
 
-### Commands:
-*   `/blockchecker` - Opens the main configuration window.
-*   `/smartblock` - Instantly blacklists your current target (must be a player).
+## Features
 
-### How to install:
-1.  Ensure you have [XIVLauncher](https://goatcorp.github.io/) installed.
-2.  Open the plugin installer in-game using `/xlplugins`.
-3.  Go to `Settings` > `Experimental`.
-4.  Add the following URL to your `Custom Plugin Repositories`:
-    `https://cdn.jsdelivr.net/gh/InTheWind222/SmartBlockChecker@main/pluginmaster.json`
-5.  Search for `SmartBlockChecker` and click Install.
+- Prevents targeted actions from being used on blocked players
+- Draws ESP markers over blocked players in the world
+- Shows a clear warning banner when your current target is blocked
+- Adds a one-command quick blacklist flow with `/smartblock`
+- Reads blacklist state directly from the game client for accurate matches
 
-*Note: This is currently a standalone plugin. If you are building from source, follow the standard Dalamud plugin build process (Visual Studio 2022, .NET 8).*
+## Commands
 
-The installer count shown by Dalamud is repo metadata from `pluginmaster.json`, not plugin-side telemetry.
+- `/blockchecker` opens the configuration window
+- `/smartblock` blacklists your current target
+
+## Installation
+
+1. Open `/xlplugins` in XIVLauncher.
+2. Go to `Settings` > `Experimental`.
+3. Add this custom repository URL:
+
+```text
+https://cdn.jsdelivr.net/gh/InTheWind222/SmartBlockChecker@main/pluginmaster.json
+```
+
+4. Search for `Smart Block Checker` in the installer and install it.
+
+## Build
+
+- Visual Studio 2022
+- .NET 8 SDK
+- XIVLauncher with Dalamud development files available locally
+
+## Notes
+
+- The download count shown by Dalamud comes from repository metadata in `pluginmaster.json`.
+- The plugin uses the game's own blacklist data. It does not maintain a separate blacklist database.

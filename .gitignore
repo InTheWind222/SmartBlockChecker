@@ -2,3 +2,9 @@
 obj/
 bin/
 *.user
+*.zip
+inspect_*/
+remote_*/
+refsheads_*/
+verify_*/
+verify*_*/

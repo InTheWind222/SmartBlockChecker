@@ -1,16 +1,16 @@
 using Dalamud.Game.Command;
 using Dalamud.IoC;
-using Dalamud.Plugin;
 using Dalamud.Interface.Windowing;
+using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Game.ClientState.Objects.Types;
-using SmartBlockChecker.Windows;
 using SmartBlockChecker.Hooking;
+using SmartBlockChecker.Windows;
 using System.Runtime.InteropServices;
 
 namespace SmartBlockChecker;
 
-public sealed class Plugin : IDalamudPlugin
+public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
 {
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
@@ -20,51 +20,40 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IGameGui GameGui { get; private set; } = null!;
     [PluginService] internal static ITargetManager TargetManager { get; private set; } = null!;
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
-    [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
 
-    private const string CommandName = "/blockchecker";
-    private const string SmartBlockCommand = "/smartblock";
+    private const string ConfigCommand = "/blockchecker";
+    private const string QuickBlockCommand = "/smartblock";
 
     public Configuration Configuration { get; init; }
-    
-    private readonly BlacklistChecker _blacklistChecker;
-    private readonly HookHandler _hookHandler;
+
+    private readonly BlacklistService _blacklistService;
+    private readonly HookController _hookController;
     private bool _hotkeyWasDown;
 
-    public readonly WindowSystem WindowSystem = new("SmartBlockChecker");
+    private readonly WindowSystem _windowSystem = new("SmartBlockChecker");
     private ConfigWindow ConfigWindow { get; init; }
     private ESPOverlay EspOverlay { get; init; }
 
-    public Plugin()
+    public SmartBlockCheckerPlugin()
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         Configuration.Initialize(PluginInterface);
 
-        _blacklistChecker = new BlacklistChecker(Log, GameInteropProvider);
-        _hookHandler = new HookHandler(GameInteropProvider, Log, _blacklistChecker, Configuration);
-        _hookHandler.Initialize();
+        _blacklistService = new BlacklistService(Log, GameInteropProvider);
+        _hookController = new HookController(GameInteropProvider, Log, _blacklistService, Configuration);
+        _hookController.Initialize();
 
-        ConfigWindow = new ConfigWindow(this, _blacklistChecker, ObjectTable, ClientState);
-        EspOverlay = new ESPOverlay(_blacklistChecker, ObjectTable, GameGui, TargetManager, Configuration, ClientState);
-        
-        WindowSystem.AddWindow(ConfigWindow);
-        WindowSystem.AddWindow(EspOverlay);
+        ConfigWindow = new ConfigWindow(this, _blacklistService, ObjectTable, ClientState);
+        EspOverlay = new ESPOverlay(_blacklistService, ObjectTable, GameGui, TargetManager, Configuration, ClientState, Log);
 
+        _windowSystem.AddWindow(ConfigWindow);
+        _windowSystem.AddWindow(EspOverlay);
         EspOverlay.IsOpen = true;
 
-        CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
-        {
-            HelpMessage = "Opens the Smart Block Checker config window"
-        });
-
-        CommandManager.AddHandler(SmartBlockCommand, new CommandInfo(OnSmartBlockCommand)
-        {
-            HelpMessage = "Instantly blacklists your current target without opening any menus."
-        });
-
-        PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
+        RegisterCommands();
+        PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
         Framework.Update += OnUpdate;
     }
@@ -72,16 +61,16 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         Framework.Update -= OnUpdate;
-        PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
+        PluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         
-        WindowSystem.RemoveAllWindows();
+        _windowSystem.RemoveAllWindows();
         ConfigWindow.Dispose();
         EspOverlay.Dispose();
 
-        _hookHandler.Dispose();
-        CommandManager.RemoveHandler(CommandName);
-        CommandManager.RemoveHandler(SmartBlockCommand);
+        _hookController.Dispose();
+        CommandManager.RemoveHandler(ConfigCommand);
+        CommandManager.RemoveHandler(QuickBlockCommand);
     }
 
     private void OnUpdate(IFramework framework)
@@ -101,62 +90,78 @@ public sealed class Plugin : IDalamudPlugin
         _hotkeyWasDown = isDown;
     }
 
-    private void OnCommand(string command, string args)
+    private void RegisterCommands()
     {
-        ToggleConfigUi();
-    }
-    
-    private void OnSmartBlockCommand(string command, string args)
-    {
-        ExecuteBlacklistTarget();
+        CommandManager.AddHandler(ConfigCommand, new CommandInfo((_, _) => ToggleConfigUi())
+        {
+            HelpMessage = "Open the Smart Block Checker configuration window."
+        });
+
+        CommandManager.AddHandler(QuickBlockCommand, new CommandInfo((_, _) => ExecuteBlacklistTarget())
+        {
+            HelpMessage = "Instantly blacklist your current target."
+        });
     }
 
     public unsafe void ExecuteBlacklistTarget()
     {
-        var target = TargetManager.Target;
-        BlacklistByObject(target);
+        TryBlacklistTarget(TargetManager.Target);
     }
 
-    public unsafe void BlacklistByObject(IGameObject? target)
+    public unsafe void TryBlacklistTarget(IGameObject? target)
     {
         if (target == null || target.ObjectKind != Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Player)
         {
-            ChatGui.PrintError("[SmartBlock] You must have a player targeted to blacklist.");
+            PrintError("You must have a player targeted to blacklist.");
             return;
         }
 
         var character = (FFXIVClientStructs.FFXIV.Client.Game.Character.Character*)target.Address;
-        if (character == null) return;
+        if (character == null)
+        {
+            PrintError("The selected target could not be read.");
+            return;
+        }
 
         ulong contentId = character->ContentId;
         ulong accountId = character->AccountId;
 
         if (contentId == 0 && accountId == 0)
         {
-            ChatGui.PrintError("[SmartBlock] Target has no valid ID to block.");
+            PrintError("Target has no valid identifiers to blacklist.");
             return;
         }
 
         string name = target.Name.TextValue;
 
-        if (_blacklistChecker.IsBlocked(contentId, accountId))
+        if (_blacklistService.IsBlocked(contentId, accountId))
         {
-            ChatGui.PrintError($"[SmartBlock] {name} is already blocked!");
+            PrintError($"{name} is already blacklisted.");
             return;
         }
 
-        bool success = _blacklistChecker.SmartBlockViaChat(name);
+        bool success = _blacklistService.ExecuteBlacklistCommand();
         if (success)
         {
-            ChatGui.Print($"[SmartBlock] Successfully added {name} to the blacklist!");
+            PrintMessage($"Added {name} to the blacklist.");
         }
         else
         {
-            ChatGui.PrintError($"[SmartBlock] Failed to add {name} to the blacklist. Check Dalamud log.");
+            PrintError($"Failed to add {name} to the blacklist. Check the Dalamud log for details.");
         }
     }
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
+
+    private static void PrintMessage(string message)
+    {
+        ChatGui.Print($"[SmartBlock] {message}");
+    }
+
+    private static void PrintError(string message)
+    {
+        ChatGui.PrintError($"[SmartBlock] {message}");
+    }
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
