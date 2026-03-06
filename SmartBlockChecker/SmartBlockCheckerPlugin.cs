@@ -6,6 +6,7 @@ using Dalamud.Plugin.Services;
 using Dalamud.Game.ClientState.Objects.Types;
 using SmartBlockChecker.Windows;
 using SmartBlockChecker.Hooking;
+using System;
 using System.Runtime.InteropServices;
 
 namespace SmartBlockChecker;
@@ -31,6 +32,7 @@ public sealed class Plugin : IDalamudPlugin
     
     private readonly BlacklistChecker _blacklistChecker;
     private readonly HookHandler _hookHandler;
+    private readonly ActiveUserTelemetryService _telemetryService;
     private bool _hotkeyWasDown;
 
     public readonly WindowSystem WindowSystem = new("SmartBlockChecker");
@@ -41,12 +43,14 @@ public sealed class Plugin : IDalamudPlugin
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         Configuration.Initialize(PluginInterface);
+        Configuration.Save();
 
         _blacklistChecker = new BlacklistChecker(Log, GameInteropProvider);
         _hookHandler = new HookHandler(GameInteropProvider, Log, _blacklistChecker, Configuration);
         _hookHandler.Initialize();
+        _telemetryService = new ActiveUserTelemetryService(Configuration, Log, GetPluginVersion());
 
-        ConfigWindow = new ConfigWindow(this, _blacklistChecker, ObjectTable, ClientState);
+        ConfigWindow = new ConfigWindow(this, _blacklistChecker, ObjectTable, ClientState, _telemetryService);
         EspOverlay = new ESPOverlay(_blacklistChecker, ObjectTable, GameGui, TargetManager, Configuration, ClientState);
         
         WindowSystem.AddWindow(ConfigWindow);
@@ -79,6 +83,7 @@ public sealed class Plugin : IDalamudPlugin
         ConfigWindow.Dispose();
         EspOverlay.Dispose();
 
+        _telemetryService.Dispose();
         _hookHandler.Dispose();
         CommandManager.RemoveHandler(CommandName);
         CommandManager.RemoveHandler(SmartBlockCommand);
@@ -86,6 +91,11 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnUpdate(IFramework framework)
     {
+        if (ClientState.IsLoggedIn)
+        {
+            _telemetryService.TryReport();
+        }
+
         if (Configuration.BlacklistHotkey <= 0 || !ClientState.IsLoggedIn)
         {
             _hotkeyWasDown = false;
@@ -157,6 +167,11 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
+
+    private static string GetPluginVersion()
+    {
+        return typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "0.0.0.0";
+    }
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
