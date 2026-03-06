@@ -12,7 +12,6 @@ namespace SmartBlockChecker.Windows;
 
 internal sealed unsafe class ConfigWindow : Window, IDisposable
 {
-    private readonly ActiveUserTelemetryService _telemetryService;
     private readonly Plugin _plugin;
     private readonly Configuration _config;
     private readonly BlacklistChecker _checker;
@@ -30,12 +29,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
     private static readonly Vector4 ColorHeader      = new(0.85f, 0.40f, 0.40f, 1.0f);
     private static readonly Vector4 ColorNearby      = new(1.0f, 0.55f, 0.20f, 1.0f);
 
-    public ConfigWindow(
-        Plugin plugin,
-        BlacklistChecker checker,
-        IObjectTable objectTable,
-        IClientState clientState,
-        ActiveUserTelemetryService telemetryService)
+    public ConfigWindow(Plugin plugin, BlacklistChecker checker, IObjectTable objectTable, IClientState clientState)
         : base("Smart Block Checker##ConfigWindow")
     {
         SizeConstraints = new WindowSizeConstraints
@@ -49,7 +43,6 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         _checker = checker;
         _objectTable = objectTable;
         _clientState = clientState;
-        _telemetryService = telemetryService;
     }
 
     public void Dispose() { }
@@ -239,59 +232,6 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
         ImGui.TextUnformatted($"Tracking {_cachedBlocked.Count} blocked player(s).");
         ImGui.PopStyleColor();
-
-        ImGui.Spacing();
-        ImGui.Spacing();
-
-        ImGui.PushStyleColor(ImGuiCol.Text, ColorYellow);
-        ImGui.TextUnformatted("Active User Telemetry");
-        ImGui.PopStyleColor();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        bool telemetryEnabled = _config.TelemetryEnabled;
-        if (ImGui.Checkbox("Count anonymous active installs", ref telemetryEnabled))
-        {
-            _config.TelemetryEnabled = telemetryEnabled;
-            _config.Save();
-        }
-
-        ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
-        ImGui.TextWrapped("Uses an anonymous random install ID and reports at most once per day while you are logged in. No character name, account ID, or chat content is sent.");
-        ImGui.PopStyleColor();
-
-        ImGui.Spacing();
-
-        string telemetryEndpoint = _config.TelemetryEndpoint ?? string.Empty;
-        if (ImGui.InputText("Telemetry Endpoint", ref telemetryEndpoint, 256))
-        {
-            _config.TelemetryEndpoint = telemetryEndpoint.Trim();
-            _config.Save();
-        }
-
-        if (ImGui.Button("Report Active Install Now", new Vector2(-1, 0)))
-        {
-            _telemetryService.ForceReport();
-        }
-
-        ImGui.Spacing();
-
-        var activeUsers = _telemetryService.LastKnownActiveUsers;
-        var statusColor = _telemetryService.IsConfigured ? ColorGreen : ColorYellow;
-        ImGui.PushStyleColor(ImGuiCol.Text, statusColor);
-        ImGui.TextUnformatted($"Last known active installs: {activeUsers}");
-        ImGui.PopStyleColor();
-
-        ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
-        ImGui.TextWrapped(_telemetryService.LastTelemetryStatus);
-        ImGui.PopStyleColor();
-
-        if (!_telemetryService.IsConfigured)
-        {
-            ImGui.PushStyleColor(ImGuiCol.Text, ColorYellow);
-            ImGui.TextWrapped("Telemetry endpoint is not configured in this build yet. Active-user counting will not work until the plugin is pointed at a live endpoint.");
-            ImGui.PopStyleColor();
-        }
     }
 
     private void DrawBlockedPlayersTab()

@@ -1,7 +1,0 @@
-name = "smartblock-active-users"
-main = "src/index.js"
-compatibility_date = "2025-01-01"
-
-[[kv_namespaces]]
-binding = "ACTIVE_USERS"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
