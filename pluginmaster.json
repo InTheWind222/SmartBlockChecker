@@ -1,4 +1,4 @@
-﻿[
+[
   {
     "Author": "jungle",
     "Name": "Smart Block Checker",
@@ -6,7 +6,7 @@
     "Punchline": "Smart block checker and ESP overlay for FFXIV.",
     "Description": "Hooks UseAction to prevent casting and wasting GCDs on blocked players. Draws ESP circles on blocked players. /blockchecker to configure.",
     "ApplicableVersion": "any",
-    "AssemblyVersion": "0.0.0.20",
+    "AssemblyVersion": "0.0.0.21",
     "RepoUrl": "https://github.com/InTheWind222/SmartBlockChecker",
     "DalamudApiLevel": 14,
     "Tags": [
@@ -16,8 +16,9 @@
     ],
     "IsHide": false,
     "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://raw.githubusercontent.com/InTheWind222/SmartBlockChecker/c253404d223ce360f765af8c3c907356c9ed1704/latest.zip",
-    "DownloadLinkUpdate": "https://raw.githubusercontent.com/InTheWind222/SmartBlockChecker/c253404d223ce360f765af8c3c907356c9ed1704/latest.zip",
+    "DownloadLinkInstall": "https://github.com/InTheWind222/SmartBlockChecker/releases/download/v0.0.0.21/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/InTheWind222/SmartBlockChecker/releases/download/v0.0.0.21/latest.zip",
     "DownloadCount": 0
   }
 ]
+
