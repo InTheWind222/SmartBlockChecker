@@ -1,4 +1,4 @@
-[
+﻿[
   {
     "Author": "jungle",
     "Name": "Smart Block Checker",
@@ -16,7 +16,8 @@
     ],
     "IsHide": false,
     "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://raw.githubusercontent.com/InTheWind222/SmartBlockChecker/c253404d223ce360f765af8c3c907356c9ed1704/latest.zip"
+    "DownloadLinkInstall": "https://raw.githubusercontent.com/InTheWind222/SmartBlockChecker/c253404d223ce360f765af8c3c907356c9ed1704/latest.zip",
+    "DownloadLinkUpdate": "https://raw.githubusercontent.com/InTheWind222/SmartBlockChecker/c253404d223ce360f765af8c3c907356c9ed1704/latest.zip",
+    "DownloadCount": 0
   }
 ]
-

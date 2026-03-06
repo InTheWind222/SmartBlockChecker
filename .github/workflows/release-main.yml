@@ -5,6 +5,8 @@ on:
     branches:
       - main
   workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
 
 permissions:
   contents: write
@@ -15,8 +17,11 @@ concurrency:
 
 jobs:
   release:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event_name != 'schedule' && github.actor != 'github-actions[bot]'
     runs-on: windows-2022
+
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
 
     steps:
       - name: Checkout
@@ -70,8 +75,20 @@ jobs:
           } else {
             $master = @($masterRaw)
           }
+
+          $repo = "${{ github.repository }}"
+          $tagName = "v$newVersion"
+          $releaseAssetUrl = "https://github.com/$repo/releases/download/$tagName/latest.zip"
+
           $master[0].AssemblyVersion = $newVersion
-          $master[0].DownloadLinkInstall = "https://raw.githubusercontent.com/InTheWind222/SmartBlockChecker/refs/heads/main/latest.zip"
+          $master[0].DownloadLinkInstall = $releaseAssetUrl
+          $master[0].DownloadLinkUpdate = $releaseAssetUrl
+          if ($null -eq $master[0].PSObject.Properties["DownloadCount"]) {
+            $master[0] | Add-Member -NotePropertyName DownloadCount -NotePropertyValue 0
+          } elseif ($null -eq $master[0].DownloadCount) {
+            $master[0].DownloadCount = 0
+          }
+
           ($master | ConvertTo-Json -Depth 20 -AsArray) + "`n" | Set-Content -NoNewline:$false -Encoding UTF8 $masterPath
 
           "new_version=$newVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -99,36 +116,140 @@ jobs:
             throw "Packaged version $($manifest.AssemblyVersion) does not match bumped version ${{ steps.bump.outputs.new_version }}"
           }
 
-      - name: Commit and push release artifacts
+      - name: Commit and push version bump
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add SmartBlockChecker/SmartBlockChecker.csproj SmartBlockChecker/SmartBlockChecker.json pluginmaster.json latest.zip
+          git add SmartBlockChecker/SmartBlockChecker.csproj SmartBlockChecker/SmartBlockChecker.json pluginmaster.json
 
           if ((git diff --cached --name-only).Count -eq 0) {
-            Write-Host "No changes to commit."
+            Write-Host "No version bump changes to commit."
             exit 0
           }
 
           git commit -m "ci: release v${{ steps.bump.outputs.new_version }} [skip ci]"
+          git push origin HEAD:main
 
-          # Pin DownloadLinkInstall to this exact release commit hash to avoid stale branch/cdn caches.
-          $releaseCommit = (git rev-parse HEAD).Trim()
-          $masterPath = "pluginmaster.json"
-          $master = Get-Content -Raw $masterPath | ConvertFrom-Json
-          if ($master -isnot [System.Array]) {
-            $master = @($master)
+      - name: Tag release commit
+        shell: pwsh
+        run: |
+          $tag = "v${{ steps.bump.outputs.new_version }}"
+          git tag -f $tag
+          git push origin "refs/tags/$tag" --force
+
+      - name: Publish GitHub release asset
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "v${{ steps.bump.outputs.new_version }}"
+          $repo = "${{ github.repository }}"
+          gh release view $tag --repo $repo *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag latest.zip --repo $repo --clobber
+          } else {
+            gh release create $tag latest.zip --repo $repo --title $tag --notes "Automated release for $tag"
           }
-          $master[0].DownloadLinkInstall = "https://raw.githubusercontent.com/InTheWind222/SmartBlockChecker/$releaseCommit/latest.zip"
+
+      - name: Purge jsDelivr cache
+        shell: pwsh
+        run: |
+          $purgeUrls = @(
+            "https://purge.jsdelivr.net/gh/InTheWind222/SmartBlockChecker@main/pluginmaster.json",
+            "https://purge.jsdelivr.net/gh/InTheWind222/SmartBlockCheccker@main/pluginmaster.json"
+          )
+          foreach ($url in $purgeUrls) {
+            try {
+              Invoke-WebRequest -UseBasicParsing -Uri $url | Out-Null
+              Write-Host "Purged: $url"
+            } catch {
+              Write-Warning "Purge failed: $url -- $($_.Exception.Message)"
+            }
+          }
+
+  refresh-download-count:
+    needs:
+      - release
+    if: always() && needs.release.result != 'failure' && needs.release.result != 'cancelled'
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Refresh manifest download count
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+
+          $masterPath = "pluginmaster.json"
+          $masterRaw = Get-Content -Raw $masterPath | ConvertFrom-Json
+          if ($masterRaw -is [System.Array]) {
+            $master = $masterRaw
+          } else {
+            $master = @($masterRaw)
+          }
+
+          $currentVersion = [string]$master[0].AssemblyVersion
+          if ([string]::IsNullOrWhiteSpace($currentVersion)) {
+            throw "pluginmaster.json is missing AssemblyVersion"
+          }
+
+          $targetTag = "v$currentVersion"
+          $releases = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$repo/releases?per_page=100"
+          $totalDownloads = 0
+          $targetAssetUrl = $null
+
+          foreach ($release in $releases) {
+            foreach ($asset in $release.assets) {
+              if ($asset.name -eq "latest.zip") {
+                $totalDownloads += [int]$asset.download_count
+                if ($release.tag_name -eq $targetTag) {
+                  $targetAssetUrl = [string]$asset.browser_download_url
+                }
+              }
+            }
+          }
+
+          if ([string]::IsNullOrWhiteSpace($targetAssetUrl)) {
+            $targetAssetUrl = "https://github.com/$repo/releases/download/$targetTag/latest.zip"
+          }
+
+          $master[0].DownloadLinkInstall = $targetAssetUrl
+          $master[0].DownloadLinkUpdate = $targetAssetUrl
+
+          if ($null -eq $master[0].PSObject.Properties["DownloadCount"]) {
+            $master[0] | Add-Member -NotePropertyName DownloadCount -NotePropertyValue $totalDownloads
+          } else {
+            $master[0].DownloadCount = $totalDownloads
+          }
+
           ($master | ConvertTo-Json -Depth 20 -AsArray) + "`n" | Set-Content -NoNewline:$false -Encoding UTF8 $masterPath
 
+      - name: Commit refreshed manifest
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add pluginmaster.json
-          if ((git diff --cached --name-only).Count -gt 0) {
-            git commit -m "ci: pin download URL for v${{ steps.bump.outputs.new_version }} [skip ci]"
+          if ((git diff --cached --name-only).Count -eq 0) {
+            Write-Host "Download count already up to date."
+            exit 0
           }
 
+          git commit -m "ci: refresh download count [skip ci]"
           git push origin HEAD:main
 
       - name: Purge jsDelivr cache
@@ -136,9 +257,7 @@ jobs:
         run: |
           $purgeUrls = @(
             "https://purge.jsdelivr.net/gh/InTheWind222/SmartBlockChecker@main/pluginmaster.json",
-            "https://purge.jsdelivr.net/gh/InTheWind222/SmartBlockChecker@main/latest.zip",
-            "https://purge.jsdelivr.net/gh/InTheWind222/SmartBlockCheccker@main/pluginmaster.json",
-            "https://purge.jsdelivr.net/gh/InTheWind222/SmartBlockCheccker@main/latest.zip"
+            "https://purge.jsdelivr.net/gh/InTheWind222/SmartBlockCheccker@main/pluginmaster.json"
           )
           foreach ($url in $purgeUrls) {
             try {
