@@ -314,8 +314,10 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
 
             ulong contentId = character->ContentId;
             ulong accountId = character->AccountId;
+            string playerName = obj.Name?.TextValue ?? string.Empty;
 
-            if ((contentId != 0 || accountId != 0) && _blacklistService.IsBlocked(contentId, accountId))
+            if ((contentId != 0 || accountId != 0 || !string.IsNullOrWhiteSpace(playerName)) &&
+                _blacklistService.IsBlocked(contentId, accountId, playerName))
             {
                 float distance = 0f;
                 var localPlayer = _objectTable.LocalPlayer;

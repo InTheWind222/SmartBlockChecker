@@ -12,6 +12,8 @@ internal sealed class BlacklistEntry
     public ulong Identifier { get; init; }
 
     public string Name { get; init; } = string.Empty;
+
+    public string NormalizedName { get; init; } = string.Empty;
 }
 
 internal unsafe sealed class BlacklistService
@@ -84,38 +86,29 @@ internal unsafe sealed class BlacklistService
 
     public bool IsBlocked(ulong contentId, ulong accountId)
     {
-        if (contentId == 0 && accountId == 0)
+        return IsBlocked(contentId, accountId, null);
+    }
+
+    public bool IsBlocked(ulong contentId, ulong accountId, string? playerName)
+    {
+        if (contentId == 0 && accountId == 0 && string.IsNullOrWhiteSpace(playerName))
         {
             return false;
         }
 
         try
         {
-            var proxy = InfoProxyBlacklist.Instance();
-            if (proxy is null)
-            {
-                return false;
-            }
+            string normalizedPlayerName = NormalizeName(playerName);
 
-            byte* proxyBase = (byte*)proxy;
-            int blockedCount = *(int*)(proxyBase + BlockedCountOffset);
-            if (blockedCount <= 0 || blockedCount > MaxEntries)
+            foreach (var entry in GetEntries())
             {
-                return false;
-            }
-
-            byte* entries = proxyBase + EntryArrayOffset;
-            for (int index = 0; index < blockedCount; index++)
-            {
-                byte* entry = entries + (index * EntrySize);
-                ulong entryIdentifier = *(ulong*)(entry + IdentifierOffset);
-
-                if (entryIdentifier == 0)
+                if (entry.Identifier != 0 && (entry.Identifier == contentId || entry.Identifier == accountId))
                 {
-                    continue;
+                    return true;
                 }
 
-                if (entryIdentifier == contentId || entryIdentifier == accountId)
+                if (!string.IsNullOrEmpty(normalizedPlayerName) &&
+                    string.Equals(entry.NormalizedName, normalizedPlayerName, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
@@ -169,7 +162,8 @@ internal unsafe sealed class BlacklistService
                 entries.Add(new BlacklistEntry
                 {
                     Identifier = identifier,
-                    Name = name
+                    Name = name,
+                    NormalizedName = NormalizeName(name)
                 });
             }
 
@@ -206,5 +200,22 @@ internal unsafe sealed class BlacklistService
         {
             return string.Empty;
         }
+    }
+
+    private static string NormalizeName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
+        string trimmed = name.Trim();
+        int worldSeparator = trimmed.IndexOf('@');
+        if (worldSeparator >= 0)
+        {
+            trimmed = trimmed[..worldSeparator];
+        }
+
+        return trimmed.Replace("  ", " ", StringComparison.Ordinal).Trim();
     }
 }

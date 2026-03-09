@@ -73,7 +73,10 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
                     var structTarget = (Character*)charTarget.Address;
                     if (structTarget != null)
                     {
-                        if (_blacklistService.IsBlocked(structTarget->ContentId, structTarget->AccountId))
+                        if (_blacklistService.IsBlocked(
+                            structTarget->ContentId,
+                            structTarget->AccountId,
+                            target.Name.TextValue))
                         {
                             DrawTargetWarning();
                         }
@@ -93,10 +96,11 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
 
                     ulong contentId = character->ContentId;
                     ulong accountId = character->AccountId;
+                    string playerName = obj.Name?.TextValue ?? string.Empty;
 
-                    if (contentId != 0 || accountId != 0)
+                    if (contentId != 0 || accountId != 0 || !string.IsNullOrWhiteSpace(playerName))
                     {
-                        if (_blacklistService.IsBlocked(contentId, accountId))
+                        if (_blacklistService.IsBlocked(contentId, accountId, playerName))
                         {
                             DrawESPCircle(obj);
                         }

@@ -134,7 +134,7 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
 
         string name = target.Name.TextValue;
 
-        if (_blacklistService.IsBlocked(contentId, accountId))
+        if (_blacklistService.IsBlocked(contentId, accountId, name))
         {
             PrintError($"{name} is already blacklisted.");
             return;
