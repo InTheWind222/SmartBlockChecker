@@ -29,6 +29,7 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
     private const string ConfigCommand = "/blockchecker";
     private const string QuickBlockCommand = "/smartblock";
     private static readonly TimeSpan NearbyAlertScanInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan NearbyLeaveGracePeriod = TimeSpan.FromSeconds(5);
 
     public Configuration Configuration { get; init; }
 
@@ -36,12 +37,20 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
     private readonly HookController _hookController;
     private bool _hotkeyWasDown;
     private bool _loggedInvalidHotkey;
-    private readonly HashSet<string> _activeNearbyAlerts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _notifiedNearbyAlerts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, NearbyAlertState> _trackedNearbyPlayers = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _lastNearbyAlertScanUtc = DateTime.MinValue;
 
     private readonly WindowSystem _windowSystem = new("SmartBlockChecker");
     private ConfigWindow ConfigWindow { get; init; }
     private ESPOverlay EspOverlay { get; init; }
+
+    private sealed class NearbyAlertState
+    {
+        public string DisplayName { get; set; } = "A blocked player";
+        public DateTime LastSeenUtc { get; set; }
+        public bool HasAnnouncedLeft { get; set; }
+    }
 
     public SmartBlockCheckerPlugin()
     {
@@ -86,7 +95,8 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
         {
             _hotkeyWasDown = false;
             _loggedInvalidHotkey = false;
-            _activeNearbyAlerts.Clear();
+            _notifiedNearbyAlerts.Clear();
+            _trackedNearbyPlayers.Clear();
             _lastNearbyAlertScanUtc = DateTime.MinValue;
             return;
         }
@@ -218,9 +228,8 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
 
     private unsafe void UpdateNearbyNotifications()
     {
-        if (!Configuration.NotifyWhenBlockedNearby)
+        if (!Configuration.NotifyWhenBlockedNearby && !Configuration.NotifyWhenBlockedLeavesOrReturns)
         {
-            _activeNearbyAlerts.Clear();
             return;
         }
 
@@ -230,11 +239,11 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
         }
 
         _lastNearbyAlertScanUtc = DateTime.UtcNow;
+        var now = _lastNearbyAlertScanUtc;
 
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null)
         {
-            _activeNearbyAlerts.Clear();
             return;
         }
 
@@ -285,14 +294,50 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
             }
 
             currentlyNearby.Add(alertKey);
-            if (_activeNearbyAlerts.Add(alertKey))
+
+            string displayName = string.IsNullOrWhiteSpace(playerName) ? "A blocked player" : playerName;
+            if (!_trackedNearbyPlayers.TryGetValue(alertKey, out var alertState))
             {
-                string displayName = string.IsNullOrWhiteSpace(playerName) ? "A blocked player" : playerName;
+                alertState = new NearbyAlertState();
+                _trackedNearbyPlayers[alertKey] = alertState;
+            }
+
+            bool wasAway = alertState.HasAnnouncedLeft;
+            alertState.DisplayName = displayName;
+            alertState.LastSeenUtc = now;
+            alertState.HasAnnouncedLeft = false;
+
+            if (Configuration.NotifyWhenBlockedNearby && _notifiedNearbyAlerts.Add(alertKey))
+            {
                 PrintMessage($"{displayName} is nearby ({distance:F1}y).");
+            }
+
+            if (Configuration.NotifyWhenBlockedLeavesOrReturns && wasAway)
+            {
+                PrintMessage($"{displayName} came back nearby ({distance:F1}y).");
             }
         }
 
-        _activeNearbyAlerts.IntersectWith(currentlyNearby);
+        if (!Configuration.NotifyWhenBlockedLeavesOrReturns)
+        {
+            return;
+        }
+
+        foreach (var (alertKey, alertState) in _trackedNearbyPlayers)
+        {
+            if (currentlyNearby.Contains(alertKey) || alertState.HasAnnouncedLeft)
+            {
+                continue;
+            }
+
+            if (now - alertState.LastSeenUtc < NearbyLeaveGracePeriod)
+            {
+                continue;
+            }
+
+            PrintMessage($"{alertState.DisplayName} left the area.");
+            alertState.HasAnnouncedLeft = true;
+        }
     }
 
     private static string BuildNearbyAlertKey(ulong contentId, ulong accountId, string? playerName)

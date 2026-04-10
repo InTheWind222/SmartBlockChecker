@@ -13,6 +13,7 @@ public class Configuration : IPluginConfiguration
     public bool ShowEspCircles { get; set; } = true;
     public bool ShowTargetWarning { get; set; } = true;
     public bool NotifyWhenBlockedNearby { get; set; } = false;
+    public bool NotifyWhenBlockedLeavesOrReturns { get; set; } = false;
 
     public float EspDotSize { get; set; } = 3.5f;
     public float EspTextScale { get; set; } = 1.0f;

@@ -274,11 +274,21 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
             }
 
             ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
-            ImGui.TextWrapped("Each blocked player is announced once while they stay nearby, then can alert again after leaving the area.");
+            ImGui.TextWrapped("Each blocked player is announced once per login session, even if they leave and come back into range later.");
             ImGui.PopStyleColor();
 
             ImGui.Unindent(20f);
         }
+
+        bool notifyWhenBlockedLeavesOrReturns = _config.NotifyWhenBlockedLeavesOrReturns;
+        if (ImGui.Checkbox("Chat alert when a tracked blocked player leaves or returns", ref notifyWhenBlockedLeavesOrReturns))
+        {
+            _config.NotifyWhenBlockedLeavesOrReturns = notifyWhenBlockedLeavesOrReturns;
+            _config.Save();
+        }
+        ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
+        ImGui.TextWrapped("Adds a leave and return message for blocked players that have already been detected nearby. Leave alerts wait a few seconds to avoid range-edge flicker spam.");
+        ImGui.PopStyleColor();
 
         ImGui.Spacing();
         ImGui.Spacing();
