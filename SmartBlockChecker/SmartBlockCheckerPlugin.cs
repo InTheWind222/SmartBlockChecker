@@ -6,6 +6,9 @@ using Dalamud.Plugin.Services;
 using Dalamud.Game.ClientState.Objects.Types;
 using SmartBlockChecker.Hooking;
 using SmartBlockChecker.Windows;
+using System;
+using System.Collections.Generic;
+using System.Numerics;
 using System.Runtime.InteropServices;
 
 namespace SmartBlockChecker;
@@ -25,12 +28,16 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
 
     private const string ConfigCommand = "/blockchecker";
     private const string QuickBlockCommand = "/smartblock";
+    private static readonly TimeSpan NearbyAlertScanInterval = TimeSpan.FromSeconds(1);
 
     public Configuration Configuration { get; init; }
 
     private readonly BlacklistService _blacklistService;
     private readonly HookController _hookController;
     private bool _hotkeyWasDown;
+    private bool _loggedInvalidHotkey;
+    private readonly HashSet<string> _activeNearbyAlerts = new(StringComparer.OrdinalIgnoreCase);
+    private DateTime _lastNearbyAlertScanUtc = DateTime.MinValue;
 
     private readonly WindowSystem _windowSystem = new("SmartBlockChecker");
     private ConfigWindow ConfigWindow { get; init; }
@@ -54,7 +61,7 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
 
         RegisterCommands();
         PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
-        PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
+        PluginInterface.UiBuilder.OpenConfigUi += OpenConfigUi;
         Framework.Update += OnUpdate;
     }
 
@@ -62,7 +69,7 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
     {
         Framework.Update -= OnUpdate;
         PluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
-        PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
+        PluginInterface.UiBuilder.OpenConfigUi -= OpenConfigUi;
         
         _windowSystem.RemoveAllWindows();
         ConfigWindow.Dispose();
@@ -75,19 +82,44 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
 
     private void OnUpdate(IFramework framework)
     {
-        if (Configuration.BlacklistHotkey <= 0 || !ClientState.IsLoggedIn)
+        if (!ClientState.IsLoggedIn)
         {
             _hotkeyWasDown = false;
+            _loggedInvalidHotkey = false;
+            _activeNearbyAlerts.Clear();
+            _lastNearbyAlertScanUtc = DateTime.MinValue;
             return;
         }
 
-        var isDown = (GetAsyncKeyState(Configuration.BlacklistHotkey) & 0x8000) != 0;
-        if (isDown && !_hotkeyWasDown)
+        if (Configuration.BlacklistHotkey <= 0)
         {
-            ExecuteBlacklistTarget();
+            _hotkeyWasDown = false;
+            _loggedInvalidHotkey = false;
+        }
+        else if (IsMouseHotkey(Configuration.BlacklistHotkey))
+        {
+            if (!_loggedInvalidHotkey)
+            {
+                Log.Warning("Ignoring invalid quick-blacklist hotkey {Hotkey}. Open /blockchecker and set a keyboard key instead.", Configuration.BlacklistHotkey);
+                _loggedInvalidHotkey = true;
+            }
+
+            _hotkeyWasDown = false;
+        }
+        else
+        {
+            _loggedInvalidHotkey = false;
+
+            var isDown = (GetAsyncKeyState(Configuration.BlacklistHotkey) & 0x8000) != 0;
+            if (isDown && !_hotkeyWasDown)
+            {
+                ExecuteBlacklistTarget(showErrors: false);
+            }
+
+            _hotkeyWasDown = isDown;
         }
 
-        _hotkeyWasDown = isDown;
+        UpdateNearbyNotifications();
     }
 
     private void RegisterCommands()
@@ -103,24 +135,30 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
         });
     }
 
-    public unsafe void ExecuteBlacklistTarget()
+    public unsafe bool ExecuteBlacklistTarget(bool showErrors = true)
     {
-        TryBlacklistTarget(TargetManager.Target);
+        return TryBlacklistTarget(TargetManager.Target, showErrors);
     }
 
-    public unsafe void TryBlacklistTarget(IGameObject? target)
+    public unsafe bool TryBlacklistTarget(IGameObject? target, bool showErrors = true)
     {
         if (target == null || target.ObjectKind != Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Player)
         {
-            PrintError("You must have a player targeted to blacklist.");
-            return;
+            if (showErrors)
+            {
+                PrintError("You must have a player targeted to blacklist.");
+            }
+            return false;
         }
 
         var character = (FFXIVClientStructs.FFXIV.Client.Game.Character.Character*)target.Address;
         if (character == null)
         {
-            PrintError("The selected target could not be read.");
-            return;
+            if (showErrors)
+            {
+                PrintError("The selected target could not be read.");
+            }
+            return false;
         }
 
         ulong contentId = character->ContentId;
@@ -128,30 +166,40 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
 
         if (contentId == 0 && accountId == 0)
         {
-            PrintError("Target has no valid identifiers to blacklist.");
-            return;
+            if (showErrors)
+            {
+                PrintError("Target has no valid identifiers to blacklist.");
+            }
+            return false;
         }
 
         string name = target.Name.TextValue;
 
         if (_blacklistService.IsBlocked(contentId, accountId, name))
         {
-            PrintError($"{name} is already blacklisted.");
-            return;
+            if (showErrors)
+            {
+                PrintError($"{name} is already blacklisted.");
+            }
+            return false;
         }
 
         bool success = _blacklistService.ExecuteBlacklistCommand();
         if (success)
         {
             PrintMessage($"Added {name} to the blacklist.");
+            return true;
         }
-        else
+
+        if (showErrors)
         {
             PrintError($"Failed to add {name} to the blacklist. Check the Dalamud log for details.");
         }
+        return false;
     }
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();
+    public void OpenConfigUi() => ConfigWindow.IsOpen = true;
 
     private static void PrintMessage(string message)
     {
@@ -161,6 +209,123 @@ public sealed class SmartBlockCheckerPlugin : IDalamudPlugin
     private static void PrintError(string message)
     {
         ChatGui.PrintError($"[SmartBlock] {message}");
+    }
+
+    private static bool IsMouseHotkey(int virtualKey)
+    {
+        return virtualKey is 1 or 2 or 4 or 5 or 6;
+    }
+
+    private unsafe void UpdateNearbyNotifications()
+    {
+        if (!Configuration.NotifyWhenBlockedNearby)
+        {
+            _activeNearbyAlerts.Clear();
+            return;
+        }
+
+        if (DateTime.UtcNow - _lastNearbyAlertScanUtc < NearbyAlertScanInterval)
+        {
+            return;
+        }
+
+        _lastNearbyAlertScanUtc = DateTime.UtcNow;
+
+        var localPlayer = ObjectTable.LocalPlayer;
+        if (localPlayer == null)
+        {
+            _activeNearbyAlerts.Clear();
+            return;
+        }
+
+        float notificationRange = Math.Clamp(Configuration.NearbyNotificationRange, 5.0f, 200.0f);
+        var currentlyNearby = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var obj in ObjectTable)
+        {
+            if (obj == null || !obj.IsValid())
+            {
+                continue;
+            }
+
+            if (obj.ObjectKind != Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Player)
+            {
+                continue;
+            }
+
+            if (obj.GameObjectId == localPlayer.GameObjectId)
+            {
+                continue;
+            }
+
+            float distance = Vector3.Distance(localPlayer.Position, obj.Position);
+            if (distance > notificationRange)
+            {
+                continue;
+            }
+
+            var character = (FFXIVClientStructs.FFXIV.Client.Game.Character.Character*)obj.Address;
+            if (character == null)
+            {
+                continue;
+            }
+
+            ulong contentId = character->ContentId;
+            ulong accountId = character->AccountId;
+            string playerName = obj.Name?.TextValue ?? string.Empty;
+            if (!_blacklistService.IsBlocked(contentId, accountId, playerName))
+            {
+                continue;
+            }
+
+            string alertKey = BuildNearbyAlertKey(contentId, accountId, playerName);
+            if (string.IsNullOrEmpty(alertKey))
+            {
+                continue;
+            }
+
+            currentlyNearby.Add(alertKey);
+            if (_activeNearbyAlerts.Add(alertKey))
+            {
+                string displayName = string.IsNullOrWhiteSpace(playerName) ? "A blocked player" : playerName;
+                PrintMessage($"{displayName} is nearby ({distance:F1}y).");
+            }
+        }
+
+        _activeNearbyAlerts.IntersectWith(currentlyNearby);
+    }
+
+    private static string BuildNearbyAlertKey(ulong contentId, ulong accountId, string? playerName)
+    {
+        if (contentId != 0)
+        {
+            return $"content:{contentId:X16}";
+        }
+
+        if (accountId != 0)
+        {
+            return $"account:{accountId:X16}";
+        }
+
+        string normalizedName = NormalizeName(playerName);
+        return string.IsNullOrEmpty(normalizedName) ? string.Empty : $"name:{normalizedName}";
+    }
+
+    private static string NormalizeName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
+        string trimmed = name.Trim();
+        int worldSeparator = trimmed.IndexOf('@');
+        if (worldSeparator >= 0)
+        {
+            trimmed = trimmed[..worldSeparator];
+        }
+
+        return trimmed.Replace("  ", " ", StringComparison.Ordinal).Trim();
     }
 
     [DllImport("user32.dll")]

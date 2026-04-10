@@ -68,7 +68,9 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
             if (_config.ShowTargetWarning)
             {
                 var target = _targetManager.Target;
-                if (target != null && target is Dalamud.Game.ClientState.Objects.Types.ICharacter charTarget)
+                if (target != null &&
+                    target.ObjectKind == Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Player &&
+                    target is Dalamud.Game.ClientState.Objects.Types.ICharacter charTarget)
                 {
                     var structTarget = (Character*)charTarget.Address;
                     if (structTarget != null)
@@ -165,17 +167,26 @@ internal sealed unsafe class ESPOverlay : Window, IDisposable
                 {
                     string playerName = obj.Name?.TextValue ?? "Unknown";
                     string text = $"\u26d4 BLOCKED: {playerName}";
-                    
-                    ImGui.SetWindowFontScale(_config.EspTextScale);
+
+                    // Scale the label based on projected height so it shrinks naturally at range
+                    // instead of staying visually oversized as the player gets farther away.
+                    float projectedHeight = MathF.Abs(headScreenPos.Y - screenPos.Y);
+                    float distanceScale = Math.Clamp(projectedHeight / 90f, 0.55f, 1.0f);
+                    float labelScale = _config.EspTextScale * distanceScale;
+                    float pillPaddingX = 6f * distanceScale;
+                    float pillPaddingY = 2f * distanceScale;
+                    float pillRounding = 4f * distanceScale;
+
+                    ImGui.SetWindowFontScale(labelScale);
                     var textSize = ImGui.CalcTextSize(text);
                     var textPos = new Vector2(headScreenPos.X - (textSize.X / 2), headScreenPos.Y);
 
-                    var pillMin = textPos - new Vector2(6, 2);
-                    var pillMax = textPos + new Vector2(textSize.X + 6, textSize.Y + 2);
+                    var pillMin = textPos - new Vector2(pillPaddingX, pillPaddingY);
+                    var pillMax = textPos + new Vector2(textSize.X + pillPaddingX, textSize.Y + pillPaddingY);
                     drawList.AddRectFilled(pillMin, pillMax,
-                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.15f, 0.0f, 0.0f, 0.85f)), 4f);
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.15f, 0.0f, 0.0f, 0.85f)), pillRounding);
                     drawList.AddRect(pillMin, pillMax,
-                        ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.3f, 0.3f, 0.9f)), 4f, ImDrawFlags.None, 1f);
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.3f, 0.3f, 0.9f)), pillRounding, ImDrawFlags.None, 1f);
 
                     drawList.AddText(textPos,
                         ImGui.ColorConvertFloat4ToU32(new Vector4(1, 0.4f, 0.4f, 1)), text);

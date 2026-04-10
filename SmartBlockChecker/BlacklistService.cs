@@ -19,15 +19,25 @@ internal sealed class BlacklistEntry
 internal unsafe sealed class BlacklistService
 {
     private delegate void ProcessChatBoxDelegate(nint uiModule, nint message, nint unused, byte a4);
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromMilliseconds(500);
 
 #pragma warning disable CS0649 // Set by Dalamud signature injection at runtime.
-    [Signature("48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 8B F2 48 8B F9 45 84 C9")]
+    [Signature("48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 8B F2 48 8B F9 45")]
     private ProcessChatBoxDelegate? _processChatBox;
 #pragma warning restore CS0649
 
     private readonly IPluginLog _log;
+    private readonly object _cacheLock = new();
+    private readonly HashSet<ulong> _cachedIdentifiers = new();
+    private readonly HashSet<string> _cachedNames = new(StringComparer.OrdinalIgnoreCase);
+    private List<BlacklistEntry> _cachedEntries = new();
+    private DateTime _lastRefreshUtc = DateTime.MinValue;
+    private bool _hasSuccessfulScan;
+    private bool _isDataUnavailable;
 
     public string DiagnosticInfo { get; private set; } = "Blacklist has not been scanned yet.";
+    public bool HasUsableData => _hasSuccessfulScan;
+    public bool IsDataUnavailable => _isDataUnavailable;
 
     private const int EntryArrayOffset = 0xF0;
     private const int BlockedCountOffset = 0x19F0;
@@ -42,6 +52,7 @@ internal unsafe sealed class BlacklistService
         _log = log;
         interopProvider.InitializeFromAttributes(this);
         _log.Information("Blacklist service initialized. ProcessChatBox signature found: {Found}", _processChatBox is not null);
+        RefreshCache(forceRefresh: true);
     }
 
     public bool ExecuteBlacklistCommand()
@@ -68,13 +79,19 @@ internal unsafe sealed class BlacklistService
             {
                 var utfCommand = new FFXIVClientStructs.FFXIV.Client.System.String.Utf8String();
                 utfCommand.Ctor();
-                utfCommand.SetString(commandPointer);
-
-                _processChatBox((nint)uiModule, (nint)(&utfCommand), IntPtr.Zero, 0);
-                utfCommand.Dtor();
+                try
+                {
+                    utfCommand.SetString(commandPointer);
+                    _processChatBox((nint)uiModule, (nint)(&utfCommand), IntPtr.Zero, 0);
+                }
+                finally
+                {
+                    utfCommand.Dtor();
+                }
             }
 
             _log.Information("Executed native blacklist command through ProcessChatBox.");
+            RefreshCache(forceRefresh: true);
             return true;
         }
         catch (Exception ex)
@@ -96,53 +113,57 @@ internal unsafe sealed class BlacklistService
             return false;
         }
 
-        try
-        {
-            string normalizedPlayerName = NormalizeName(playerName);
+        RefreshCache();
 
-            foreach (var entry in GetEntries())
+        string normalizedPlayerName = NormalizeName(playerName);
+        lock (_cacheLock)
+        {
+            if (_cachedIdentifiers.Contains(contentId) || _cachedIdentifiers.Contains(accountId))
             {
-                if (entry.Identifier != 0 && (entry.Identifier == contentId || entry.Identifier == accountId))
-                {
-                    return true;
-                }
-
-                if (!string.IsNullOrEmpty(normalizedPlayerName) &&
-                    string.Equals(entry.NormalizedName, normalizedPlayerName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
+                return true;
             }
-        }
-        catch (Exception ex)
-        {
-            _log.Warning(ex, "Failed while checking whether a player is blacklisted.");
-        }
 
-        return false;
+            return !string.IsNullOrEmpty(normalizedPlayerName) && _cachedNames.Contains(normalizedPlayerName);
+        }
     }
 
-    public List<BlacklistEntry> GetEntries()
+    public List<BlacklistEntry> GetEntries(bool forceRefresh = false)
     {
-        var entries = new List<BlacklistEntry>();
+        RefreshCache(forceRefresh);
+        lock (_cacheLock)
+        {
+            return new List<BlacklistEntry>(_cachedEntries);
+        }
+    }
 
+    public bool RefreshCache(bool forceRefresh = false)
+    {
         try
         {
+            lock (_cacheLock)
+            {
+                if (!forceRefresh && DateTime.UtcNow - _lastRefreshUtc < RefreshInterval)
+                {
+                    return _hasSuccessfulScan;
+                }
+            }
+
             var proxy = InfoProxyBlacklist.Instance();
             if (proxy is null)
             {
-                DiagnosticInfo = "Blacklist info proxy is not loaded yet.";
-                return entries;
+                return HandleUnavailableSnapshot("Blacklist info proxy is not loaded yet.");
             }
 
             byte* proxyBase = (byte*)proxy;
             int blockedCount = *(int*)(proxyBase + BlockedCountOffset);
-            if (blockedCount <= 0 || blockedCount > MaxEntries)
+            if (blockedCount < 0 || blockedCount > MaxEntries)
             {
-                DiagnosticInfo = $"Blacklist count is invalid: {blockedCount}.";
-                return entries;
+                return HandleUnavailableSnapshot($"Blacklist count is invalid: {blockedCount}.");
             }
 
+            var entries = new List<BlacklistEntry>(blockedCount);
+            var identifiers = new HashSet<ulong>();
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             byte* rawEntries = proxyBase + EntryArrayOffset;
             for (int index = 0; index < blockedCount; index++)
             {
@@ -159,23 +180,53 @@ internal unsafe sealed class BlacklistService
                     name = $"ID:0x{identifier:X}";
                 }
 
+                string normalizedName = NormalizeName(name);
                 entries.Add(new BlacklistEntry
                 {
                     Identifier = identifier,
                     Name = name,
-                    NormalizedName = NormalizeName(name)
+                    NormalizedName = normalizedName
                 });
+                identifiers.Add(identifier);
+                if (!string.IsNullOrEmpty(normalizedName))
+                {
+                    names.Add(normalizedName);
+                }
             }
 
-            DiagnosticInfo = $"Loaded {entries.Count} blacklist entries.";
+            lock (_cacheLock)
+            {
+                _cachedEntries = entries;
+                _cachedIdentifiers.Clear();
+                _cachedIdentifiers.UnionWith(identifiers);
+                _cachedNames.Clear();
+                _cachedNames.UnionWith(names);
+                _hasSuccessfulScan = true;
+                _isDataUnavailable = false;
+                _lastRefreshUtc = DateTime.UtcNow;
+                DiagnosticInfo = $"Loaded {entries.Count} blacklist entries.";
+            }
+
+            return true;
         }
         catch (Exception ex)
         {
-            DiagnosticInfo = $"Blacklist scan failed: {ex.GetType().Name}";
             _log.Warning(ex, "Failed while reading blacklist entries.");
+            return HandleUnavailableSnapshot($"Blacklist scan failed: {ex.GetType().Name}");
         }
+    }
 
-        return entries;
+    private bool HandleUnavailableSnapshot(string message)
+    {
+        lock (_cacheLock)
+        {
+            _lastRefreshUtc = DateTime.UtcNow;
+            _isDataUnavailable = true;
+            DiagnosticInfo = _hasSuccessfulScan
+                ? $"{message} Using last known blacklist snapshot."
+                : message;
+            return _hasSuccessfulScan;
+        }
     }
 
     private static string ReadCStringPointer(byte* address)

@@ -22,6 +22,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
     private List<BlacklistEntry> _cachedBlockedEntries = new();
     private int _refreshCounter;
     private const int RefreshInterval = 120;
+    private static readonly TimeSpan HotkeyCaptureDelay = TimeSpan.FromMilliseconds(150);
 
     private static readonly Vector4 ColorRed         = new(1.0f, 0.30f, 0.30f, 1.0f);
     private static readonly Vector4 ColorGreen       = new(0.30f, 1.0f, 0.30f, 1.0f);
@@ -45,6 +46,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         _blacklistService = blacklistService;
         _objectTable = objectTable;
         _clientState = clientState;
+        RefreshBlockedEntries(forceRefresh: true);
     }
 
     public void Dispose() { }
@@ -55,7 +57,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         if (_refreshCounter >= RefreshInterval)
         {
             _refreshCounter = 0;
-            _cachedBlockedEntries = _blacklistService.GetEntries();
+            RefreshBlockedEntries();
         }
 
         ImGui.PushStyleColor(ImGuiCol.Text, ColorHeader);
@@ -95,6 +97,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
     }
 
     private bool _isRecordingHotkey = false;
+    private DateTime _hotkeyRecordingStartedUtc = DateTime.MinValue;
 
     private void DrawSettingsTab()
     {
@@ -108,7 +111,10 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
 
         if (ImGui.Button("Blacklist Current Target", new Vector2(-1, 30)))
         {
-            _plugin.ExecuteBlacklistTarget();
+            if (_plugin.ExecuteBlacklistTarget())
+            {
+                RefreshBlockedEntries(forceRefresh: true);
+            }
         }
         ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
         ImGui.TextWrapped("Instantly blacklists whoever you are currently targeting.");
@@ -125,20 +131,31 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         if (ImGui.Button($"{hotkeyName}##HotkeyRecord", new Vector2(150, 0)))
         {
             _isRecordingHotkey = true;
+            _hotkeyRecordingStartedUtc = DateTime.UtcNow;
         }
 
         if (_isRecordingHotkey)
         {
-            for (int vk = 1; vk < 255; vk++)
+            bool canCaptureKey = DateTime.UtcNow - _hotkeyRecordingStartedUtc >= HotkeyCaptureDelay;
+            if (canCaptureKey)
             {
-                if ((GetAsyncKeyState(vk) & 0x8000) != 0)
+                for (int vk = 1; vk < 255; vk++)
                 {
-                    _config.BlacklistHotkey = vk;
-                    _config.Save();
-                    _isRecordingHotkey = false;
-                    break;
+                    if (vk is 1 or 2 or 4 or 5 or 6)
+                    {
+                        continue;
+                    }
+
+                    if ((GetAsyncKeyState(vk) & 0x8000) != 0)
+                    {
+                        _config.BlacklistHotkey = vk;
+                        _config.Save();
+                        _isRecordingHotkey = false;
+                        break;
+                    }
                 }
             }
+
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) || ImGui.IsMouseClicked(ImGuiMouseButton.Right))
             {
                 _isRecordingHotkey = false;
@@ -228,6 +245,43 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
 
         ImGui.Spacing();
         ImGui.Spacing();
+
+        ImGui.PushStyleColor(ImGuiCol.Text, ColorYellow);
+        ImGui.TextUnformatted("Nearby Alerts");
+        ImGui.PopStyleColor();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        bool notifyWhenBlockedNearby = _config.NotifyWhenBlockedNearby;
+        if (ImGui.Checkbox("Chat alert when a blocked player is nearby", ref notifyWhenBlockedNearby))
+        {
+            _config.NotifyWhenBlockedNearby = notifyWhenBlockedNearby;
+            _config.Save();
+        }
+        ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
+        ImGui.TextWrapped("Prints a one-time chat notification with that player's name when they enter your configured range.");
+        ImGui.PopStyleColor();
+
+        if (_config.NotifyWhenBlockedNearby)
+        {
+            ImGui.Indent(20f);
+
+            float nearbyNotificationRange = _config.NearbyNotificationRange;
+            if (ImGui.SliderFloat("Alert Range", ref nearbyNotificationRange, 5.0f, 200.0f, "%.0fy"))
+            {
+                _config.NearbyNotificationRange = nearbyNotificationRange;
+                _config.Save();
+            }
+
+            ImGui.PushStyleColor(ImGuiCol.Text, ColorDimText);
+            ImGui.TextWrapped("Each blocked player is announced once while they stay nearby, then can alert again after leaving the area.");
+            ImGui.PopStyleColor();
+
+            ImGui.Unindent(20f);
+        }
+
+        ImGui.Spacing();
+        ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -303,6 +357,20 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
         }
 
         var nearbyPlayers = new List<(IGameObject Obj, string Name, float Distance)>();
+        var cachedIdentifiers = new HashSet<ulong>();
+        var cachedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in _cachedBlockedEntries)
+        {
+            if (entry.Identifier != 0)
+            {
+                cachedIdentifiers.Add(entry.Identifier);
+            }
+
+            if (!string.IsNullOrEmpty(entry.NormalizedName))
+            {
+                cachedNames.Add(entry.NormalizedName);
+            }
+        }
 
         foreach (var obj in _objectTable)
         {
@@ -316,8 +384,7 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
             ulong accountId = character->AccountId;
             string playerName = obj.Name?.TextValue ?? string.Empty;
 
-            if ((contentId != 0 || accountId != 0 || !string.IsNullOrWhiteSpace(playerName)) &&
-                _blacklistService.IsBlocked(contentId, accountId, playerName))
+            if (MatchesCachedBlacklist(contentId, accountId, playerName, cachedIdentifiers, cachedNames))
             {
                 float distance = 0f;
                 var localPlayer = _objectTable.LocalPlayer;
@@ -367,6 +434,44 @@ internal sealed unsafe class ConfigWindow : Window, IDisposable
 
             ImGui.EndTable();
         }
+    }
+
+    private void RefreshBlockedEntries(bool forceRefresh = false)
+    {
+        _cachedBlockedEntries = _blacklistService.GetEntries(forceRefresh);
+    }
+
+    private static bool MatchesCachedBlacklist(
+        ulong contentId,
+        ulong accountId,
+        string playerName,
+        HashSet<ulong> identifiers,
+        HashSet<string> names)
+    {
+        if ((contentId != 0 && identifiers.Contains(contentId)) || (accountId != 0 && identifiers.Contains(accountId)))
+        {
+            return true;
+        }
+
+        string normalizedName = NormalizeName(playerName);
+        return !string.IsNullOrEmpty(normalizedName) && names.Contains(normalizedName);
+    }
+
+    private static string NormalizeName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
+        string trimmed = name.Trim();
+        int worldSeparator = trimmed.IndexOf('@');
+        if (worldSeparator >= 0)
+        {
+            trimmed = trimmed[..worldSeparator];
+        }
+
+        return trimmed.Replace("  ", " ", StringComparison.Ordinal).Trim();
     }
 
     [DllImport("user32.dll")]

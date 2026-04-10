@@ -12,9 +12,11 @@ public class Configuration : IPluginConfiguration
     public bool PreventBlockedActions { get; set; } = true;
     public bool ShowEspCircles { get; set; } = true;
     public bool ShowTargetWarning { get; set; } = true;
+    public bool NotifyWhenBlockedNearby { get; set; } = false;
 
     public float EspDotSize { get; set; } = 3.5f;
     public float EspTextScale { get; set; } = 1.0f;
+    public float NearbyNotificationRange { get; set; } = 60.0f;
 
     public int BlacklistHotkey { get; set; } = 0; // 0 = disabled
 
